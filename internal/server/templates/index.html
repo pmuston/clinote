@@ -1,0 +1,103 @@
+{{define "index"}}<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{.Title}} — clinote</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/htmx.min.js"></script>
+<script src="/static/sortable.js" defer></script>
+</head>
+<body>
+<header>
+  <h1>{{.Title}}</h1>
+  <span class="path">{{.Path}}</span>
+  <span class="save-status" id="save-status">saved</span>
+  <button class="interrupt-btn" id="interrupt-btn"
+          hx-post="/interrupt" hx-swap="none"
+          style="display:none">Interrupt</button>
+</header>
+<main id="notebook">
+{{range .Units}}
+  {{if eq .Kind "prose"}}{{template "prose" .}}
+  {{else if eq .Kind "cell"}}{{template "cell" .}}
+  {{else if eq .Kind "orphan"}}{{template "orphan" .}}
+  {{end}}
+{{end}}
+</main>
+<script>
+// Show the interrupt button while a run is in flight.
+document.body.addEventListener("htmx:beforeRequest", function(e) {
+  if (e.detail.requestConfig.path.startsWith("/run/")) {
+    document.getElementById("interrupt-btn").style.display = "";
+    document.getElementById("save-status").textContent = "running…";
+  }
+});
+document.body.addEventListener("htmx:afterSwap", function(e) {
+  // If no spinners remain, hide the interrupt button and mark saved.
+  if (!document.querySelector(".spinner")) {
+    document.getElementById("interrupt-btn").style.display = "none";
+    document.getElementById("save-status").textContent = "saved";
+  }
+});
+</script>
+</body>
+</html>{{end}}
+
+{{define "prose"}}<div class="prose" id="prose-{{.Idx}}" data-idx="{{.Idx}}">
+  <button class="prose-edit-btn"
+          hx-get="/prose/{{.Idx}}/edit"
+          hx-target="#prose-{{.Idx}}" hx-swap="outerHTML">edit</button>
+  {{.ProseHTML}}
+</div>{{end}}
+
+{{define "prose-edit"}}<div class="prose prose-edit" id="prose-{{.Idx}}">
+  <form hx-post="/prose/{{.Idx}}" hx-target="#prose-{{.Idx}}" hx-swap="outerHTML">
+    <textarea name="text" autofocus>{{.Raw}}</textarea>
+    <div><button type="submit">save</button>
+    <button type="button"
+            hx-get="/prose/{{.Idx}}"
+            hx-target="#prose-{{.Idx}}" hx-swap="outerHTML">cancel</button></div>
+  </form>
+</div>{{end}}
+
+{{define "cell"}}<div class="cell" id="cell-{{.Idx}}">
+  <pre class="command"><code>{{.Command}}</code></pre>
+  <div class="controls">
+    <button class="run-btn"
+            hx-post="/run/{{.Idx}}"
+            hx-target="#cell-{{.Idx}}" hx-swap="outerHTML"
+            {{if .Running}}disabled{{end}}>Run</button>
+    {{if .HasOutput}}<span class="muted">{{.OutputType}}</span>{{end}}
+  </div>
+  {{if .Running}}{{template "spinner" .}}
+  {{else if .HasOutput}}{{template "output" .}}
+  {{end}}
+</div>{{end}}
+
+{{define "spinner"}}<div class="spinner"
+       hx-get="/cell/{{.Idx}}"
+       hx-trigger="every 500ms"
+       hx-target="#cell-{{.Idx}}" hx-swap="outerHTML">running…</div>{{end}}
+
+{{define "output"}}<div class="output output-{{.OutputType}}">
+  {{if eq .OutputType "text"}}<pre class="output-text">{{.OutputHTML}}</pre>
+  {{else}}{{.OutputHTML}}
+  {{end}}
+</div>
+<div class="output-footer{{if .Failed}} failed{{end}}">exit={{.ExitCode}} · dur={{.Duration}}{{if .Truncated}} · truncated{{end}}</div>{{end}}
+
+{{define "orphan"}}<div class="orphan-output" id="orphan-{{.Idx}}">
+  <div class="label">orphaned output (no matching command)</div>
+  {{template "output" .}}
+</div>{{end}}
+
+{{define "picker"}}<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>clinote — pick a notebook</title>
+<link rel="stylesheet" href="/static/style.css">
+</head><body><header><h1>clinote</h1></header>
+<main>
+<h2>Notebooks in this directory</h2>
+{{if .Files}}<ul>
+{{range .Files}}<li><a href="/?notebook={{.}}">{{.}}</a></li>{{end}}
+</ul>{{else}}<p>No .md files in {{.Cwd}}.</p>{{end}}
+</main></body></html>{{end}}

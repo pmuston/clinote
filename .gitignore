@@ -1,0 +1,4 @@
+/clinote
+*.test
+*.out
+.DS_Store

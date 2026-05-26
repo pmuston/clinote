@@ -1,0 +1,184 @@
+package notebook
+
+import (
+	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+)
+
+// SetOutput replaces or inserts the output block following the CommandBlock at
+// blockIdx. If an OutputBlock immediately follows (with whitespace-only between
+// per §2.4), it is replaced in place; otherwise a new OutputBlock is inserted
+// directly after the command with a single blank line of separation.
+//
+// On success, the notebook is re-parsed from the new bytes and block indices
+// reflect the post-edit state.
+func (nb *Notebook) SetOutput(blockIdx int, body string, attrs map[string]string) error {
+	if blockIdx < 0 || blockIdx >= len(nb.Blocks) {
+		return fmt.Errorf("block index %d out of range", blockIdx)
+	}
+	cmd, ok := nb.Blocks[blockIdx].(CommandBlock)
+	if !ok {
+		return fmt.Errorf("block at index %d is not a command block", blockIdx)
+	}
+
+	var existing *OutputBlock
+	if blockIdx+1 < len(nb.Blocks) {
+		if ob, ok := nb.Blocks[blockIdx+1].(OutputBlock); ok {
+			if isOnlyWhitespace(nb.Source[cmd.End:ob.Start]) {
+				existing = &ob
+			}
+		}
+	}
+
+	rendered := renderOutputBlock(body, attrs)
+
+	var newSrc []byte
+	if existing != nil {
+		newSrc = spliceBytes(nb.Source, existing.Start, existing.End, rendered)
+	} else {
+		// Insert directly after the command with a blank line of separation.
+		insert := append([]byte{'\n'}, rendered...)
+		newSrc = spliceBytes(nb.Source, cmd.End, cmd.End, insert)
+	}
+	return nb.reparse(newSrc)
+}
+
+// SetProse replaces the bytes of the ProseBlock at blockIdx with newText.
+// newText is taken verbatim — the caller is responsible for trailing newlines.
+func (nb *Notebook) SetProse(blockIdx int, newText string) error {
+	if blockIdx < 0 || blockIdx >= len(nb.Blocks) {
+		return fmt.Errorf("block index %d out of range", blockIdx)
+	}
+	pb, ok := nb.Blocks[blockIdx].(ProseBlock)
+	if !ok {
+		return fmt.Errorf("block at index %d is not a prose block", blockIdx)
+	}
+	newSrc := spliceBytes(nb.Source, pb.Start, pb.End, []byte(newText))
+	return nb.reparse(newSrc)
+}
+
+// WriteFile writes the current notebook bytes to path atomically.
+func (nb *Notebook) WriteFile(path string) error {
+	data := nb.Serialize()
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".clinote-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return err
+	}
+	return nil
+}
+
+func (nb *Notebook) reparse(newSrc []byte) error {
+	parsed, err := Parse(bytes.NewReader(newSrc))
+	if err != nil {
+		return err
+	}
+	nb.Source = parsed.Source
+	nb.FrontMatter = parsed.FrontMatter
+	nb.Blocks = parsed.Blocks
+	nb.edits = nil
+	return nil
+}
+
+func spliceBytes(src []byte, start, end int, replacement []byte) []byte {
+	out := make([]byte, 0, len(src)-end+start+len(replacement))
+	out = append(out, src[:start]...)
+	out = append(out, replacement...)
+	out = append(out, src[end:]...)
+	return out
+}
+
+func isOnlyWhitespace(b []byte) bool {
+	for _, c := range b {
+		if c != ' ' && c != '\t' && c != '\n' && c != '\r' {
+			return false
+		}
+	}
+	return true
+}
+
+// renderOutputBlock formats an output block ready to splice into a notebook.
+// The fence length is one greater than the longest run of backticks in body
+// (minimum 3). Attributes are written in stable order: type, exit, ran, dur,
+// truncated, then any remaining keys alphabetically. A bare key (empty value)
+// renders without `=`; otherwise as `k=v`.
+func renderOutputBlock(body string, attrs map[string]string) []byte {
+	fenceLen := maxBacktickRun(body) + 1
+	if fenceLen < 3 {
+		fenceLen = 3
+	}
+	fence := strings.Repeat("`", fenceLen)
+
+	var buf bytes.Buffer
+	buf.WriteString(fence)
+	buf.WriteString("output")
+	for _, k := range orderedAttrKeys(attrs) {
+		buf.WriteByte(' ')
+		buf.WriteString(k)
+		if v := attrs[k]; v != "" {
+			buf.WriteByte('=')
+			buf.WriteString(v)
+		}
+	}
+	buf.WriteByte('\n')
+	buf.WriteString(body)
+	if !strings.HasSuffix(body, "\n") {
+		buf.WriteByte('\n')
+	}
+	buf.WriteString(fence)
+	buf.WriteByte('\n')
+	return buf.Bytes()
+}
+
+func maxBacktickRun(s string) int {
+	max, cur := 0, 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '`' {
+			cur++
+			if cur > max {
+				max = cur
+			}
+		} else {
+			cur = 0
+		}
+	}
+	return max
+}
+
+func orderedAttrKeys(attrs map[string]string) []string {
+	stable := []string{"type", "exit", "ran", "dur", "truncated"}
+	out := make([]string, 0, len(attrs))
+	seen := map[string]bool{}
+	for _, k := range stable {
+		if _, ok := attrs[k]; ok {
+			out = append(out, k)
+			seen[k] = true
+		}
+	}
+	rest := make([]string, 0)
+	for k := range attrs {
+		if !seen[k] {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
+}

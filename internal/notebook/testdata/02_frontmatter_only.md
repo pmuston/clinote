@@ -1,0 +1,5 @@
+---
+title: Just front matter
+created: 2026-05-26T14:30:00Z
+shell: bash
+---

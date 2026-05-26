@@ -1,0 +1,3 @@
+```sh out
+echo bare
+```
