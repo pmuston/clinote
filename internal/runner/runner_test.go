@@ -144,6 +144,38 @@ func TestNearSentinelInOutputNotConfused(t *testing.T) {
 	}
 }
 
+func TestStdoutStderrCapturedSeparately(t *testing.T) {
+	r := newRunner(t)
+	res, err := r.Run(context.Background(), `printf 'out\n'; printf 'err\n' 1>&2`)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.ExitCode != 0 {
+		t.Errorf("exit = %d", res.ExitCode)
+	}
+	if string(res.Stdout) != "out\n" {
+		t.Errorf("Stdout = %q, want %q", res.Stdout, "out\n")
+	}
+	if string(res.Stderr) != "err\n" {
+		t.Errorf("Stderr = %q, want %q", res.Stderr, "err\n")
+	}
+	// Back-compat alias.
+	if string(res.Output) != string(res.Stdout) {
+		t.Errorf("Output should alias Stdout")
+	}
+}
+
+func TestStderrOnFailureCaptured(t *testing.T) {
+	r := newRunner(t)
+	res, err := r.Run(context.Background(), `ls /this-path-does-not-exist-clinote-test 2>&1 1>/dev/null; false`)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.ExitCode == 0 {
+		t.Errorf("expected non-zero exit, got %d", res.ExitCode)
+	}
+}
+
 func TestANSIStripped(t *testing.T) {
 	r := newRunner(t)
 	// Emit explicit CSI red+reset around text.

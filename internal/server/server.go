@@ -62,6 +62,11 @@ func (s *Server) Register(e *echo.Echo) {
 	e.GET("/prose/:idx", s.handleProseView)
 	e.GET("/prose/:idx/edit", s.handleProseEdit)
 	e.POST("/prose/:idx", s.handleProseSave)
+	e.POST("/add-cell", s.handleAddCell)
+	e.POST("/block/:idx/delete", s.handleBlockDelete)
+	e.GET("/cell/:idx/edit", s.handleCellEdit)
+	e.POST("/cell/:idx/edit", s.handleCellSave)
+	e.POST("/cell/:idx/format", s.handleCellFormat)
 	e.GET("/picker", s.handlePicker)
 	e.GET("/static/*", echo.WrapHandler(http.StripPrefix("/static/", http.FileServer(http.FS(staticFS())))))
 }

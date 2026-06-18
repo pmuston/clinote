@@ -16,13 +16,8 @@
           hx-post="/interrupt" hx-swap="none"
           style="display:none">Interrupt</button>
 </header>
-<main id="notebook">
-{{range .Units}}
-  {{if eq .Kind "prose"}}{{template "prose" .}}
-  {{else if eq .Kind "cell"}}{{template "cell" .}}
-  {{else if eq .Kind "orphan"}}{{template "orphan" .}}
-  {{end}}
-{{end}}
+<main id="notebook"{{if .Wide}} class="wide"{{end}}>
+{{template "notebook-body" .Units}}
 </main>
 <script>
 // Show the interrupt button while a run is in flight.
@@ -43,10 +38,29 @@ document.body.addEventListener("htmx:afterSwap", function(e) {
 </body>
 </html>{{end}}
 
+{{define "notebook-body"}}{{range .}}{{if eq .Kind "prose"}}{{if .StartInEditMode}}{{template "prose-edit" .}}{{else}}{{template "prose" .}}{{end}}{{else if eq .Kind "cell"}}{{if .StartInEditMode}}{{template "cell-edit" .}}{{else}}{{template "cell" .}}{{end}}{{else if eq .Kind "orphan"}}{{template "orphan" .}}{{end}}{{end}}
+<div class="add-cell-row">
+  <button class="add-cell-btn"
+          hx-post="/add-cell?kind=sh"
+          hx-target="#notebook"
+          hx-swap="innerHTML">+ sh cell</button>
+  <button class="add-cell-btn"
+          hx-post="/add-cell?kind=prose"
+          hx-target="#notebook"
+          hx-swap="innerHTML">+ prose</button>
+</div>{{end}}
+
 {{define "prose"}}<div class="prose" id="prose-{{.Idx}}" data-idx="{{.Idx}}">
-  <button class="prose-edit-btn"
-          hx-get="/prose/{{.Idx}}/edit"
-          hx-target="#prose-{{.Idx}}" hx-swap="outerHTML">edit</button>
+  <div class="prose-tools">
+    <button class="prose-edit-btn"
+            hx-get="/prose/{{.Idx}}/edit"
+            hx-target="#prose-{{.Idx}}" hx-swap="outerHTML">edit</button>
+    <button class="delete-btn"
+            title="Delete this prose block"
+            hx-confirm="Delete this prose block?"
+            hx-post="/block/{{.Idx}}/delete"
+            hx-target="#notebook" hx-swap="innerHTML">×</button>
+  </div>
   {{.ProseHTML}}
 </div>{{end}}
 
@@ -67,11 +81,43 @@ document.body.addEventListener("htmx:afterSwap", function(e) {
             hx-post="/run/{{.Idx}}"
             hx-target="#cell-{{.Idx}}" hx-swap="outerHTML"
             {{if .Running}}disabled{{end}}>Run</button>
-    {{if .HasOutput}}<span class="muted">{{.OutputType}}</span>{{end}}
+    {{if .Editable}}<button class="cell-edit-btn"
+            hx-get="/cell/{{.Idx}}/edit"
+            hx-target="#cell-{{.Idx}}" hx-swap="outerHTML"
+            {{if .Running}}disabled{{end}}>edit</button>
+    <select class="format-picker" name="type"
+            hx-post="/cell/{{.Idx}}/format"
+            hx-target="#cell-{{.Idx}}" hx-swap="outerHTML"
+            hx-trigger="change"
+            {{if .Running}}disabled{{end}}>
+      <option value="text"{{if eq .OutHint "text"}} selected{{end}}>text</option>
+      <option value="csv"{{if eq .OutHint "csv"}} selected{{end}}>csv</option>
+      <option value="tsv"{{if eq .OutHint "tsv"}} selected{{end}}>tsv</option>
+      <option value="jsonl"{{if eq .OutHint "jsonl"}} selected{{end}}>jsonl</option>
+    </select>
+    <button class="delete-btn"
+            title="Delete this cell"
+            hx-confirm="Delete this cell?"
+            hx-post="/block/{{.Idx}}/delete"
+            hx-target="#notebook" hx-swap="innerHTML"
+            {{if .Running}}disabled{{end}}>×</button>
+    {{else if .HasOutput}}<span class="muted">{{.OutputType}}</span>{{end}}
   </div>
   {{if .Running}}{{template "spinner" .}}
   {{else if .HasOutput}}{{template "output" .}}
   {{end}}
+</div>{{end}}
+
+{{define "cell-edit"}}<div class="cell cell-editing" id="cell-{{.Idx}}">
+  <form hx-post="/cell/{{.Idx}}/edit" hx-target="#cell-{{.Idx}}" hx-swap="outerHTML">
+    <textarea name="text" class="command-edit" autofocus>{{.Command}}</textarea>
+    <div class="controls">
+      <button type="submit">save</button>
+      <button type="button"
+              hx-get="/cell/{{.Idx}}"
+              hx-target="#cell-{{.Idx}}" hx-swap="outerHTML">cancel</button>
+    </div>
+  </form>
 </div>{{end}}
 
 {{define "spinner"}}<div class="spinner"
@@ -79,15 +125,17 @@ document.body.addEventListener("htmx:afterSwap", function(e) {
        hx-trigger="every 500ms"
        hx-target="#cell-{{.Idx}}" hx-swap="outerHTML">running…</div>{{end}}
 
-{{define "output"}}<div class="output output-{{.OutputType}}">
-  {{if eq .OutputType "text"}}<pre class="output-text">{{.OutputHTML}}</pre>
-  {{else}}{{.OutputHTML}}
-  {{end}}
-</div>
+{{define "output"}}{{if eq .OutputType "text"}}<pre class="output output-text">{{.OutputHTML}}</pre>{{else}}<div class="output output-{{.OutputType}}">{{.OutputHTML}}</div>{{end}}
 <div class="output-footer{{if .Failed}} failed{{end}}">exit={{.ExitCode}} · dur={{.Duration}}{{if .Truncated}} · truncated{{end}}</div>{{end}}
 
 {{define "orphan"}}<div class="orphan-output" id="orphan-{{.Idx}}">
-  <div class="label">orphaned output (no matching command)</div>
+  <div class="label">orphaned output (no matching command)
+    {{if .Editable}}<button class="delete-btn delete-btn-inline"
+            title="Delete this orphan"
+            hx-confirm="Delete this orphan output?"
+            hx-post="/block/{{.Idx}}/delete"
+            hx-target="#notebook" hx-swap="innerHTML">×</button>{{end}}
+  </div>
   {{template "output" .}}
 </div>{{end}}
 

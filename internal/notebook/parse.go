@@ -41,9 +41,11 @@ func parseFrontMatter(src []byte, fm *FrontMatter) (int, error) {
 			fm.Raw = raw
 			if len(bytes.TrimSpace(raw)) > 0 {
 				var data struct {
-					Title   string    `yaml:"title"`
-					Created time.Time `yaml:"created"`
-					Shell   string    `yaml:"shell"`
+					Title    string    `yaml:"title"`
+					Created  time.Time `yaml:"created"`
+					Shell    string    `yaml:"shell"`
+					Editable bool      `yaml:"editable"`
+					Width    string    `yaml:"width"`
 				}
 				if err := yaml.Unmarshal(raw, &data); err != nil {
 					return 0, fmt.Errorf("front matter yaml: %w", err)
@@ -51,6 +53,8 @@ func parseFrontMatter(src []byte, fm *FrontMatter) (int, error) {
 				fm.Title = data.Title
 				fm.Created = data.Created
 				fm.Shell = data.Shell
+				fm.Editable = data.Editable
+				fm.Width = data.Width
 			}
 			return pos + len(open), nil
 		}

@@ -47,6 +47,174 @@ func (nb *Notebook) SetOutput(blockIdx int, body string, attrs map[string]string
 	return nb.reparse(newSrc)
 }
 
+// SetCommandOutType updates only the `out` attribute on the CommandBlock at
+// blockIdx. Other attributes and the body are preserved. An outType of ""
+// or "text" removes the `out` attribute (text is the default).
+//
+// Used by the in-browser type picker so the command's declared hint stays in
+// sync with the output block's actual `type=`.
+func (nb *Notebook) SetCommandOutType(blockIdx int, outType string) error {
+	if blockIdx < 0 || blockIdx >= len(nb.Blocks) {
+		return fmt.Errorf("block index %d out of range", blockIdx)
+	}
+	cb, ok := nb.Blocks[blockIdx].(CommandBlock)
+	if !ok {
+		return fmt.Errorf("block at index %d is not a command block", blockIdx)
+	}
+	attrs := make(map[string]string, len(cb.Attrs))
+	for k, v := range cb.Attrs {
+		attrs[k] = v
+	}
+	if outType == "" || outType == "text" {
+		delete(attrs, "out")
+	} else {
+		attrs["out"] = outType
+	}
+	return nb.setCommandAttrs(blockIdx, cb, attrs)
+}
+
+// setCommandAttrs rewrites the opening fence line (info string) of the
+// CommandBlock at blockIdx using the given attrs. Preserves fence-character
+// count and the body.
+func (nb *Notebook) setCommandAttrs(blockIdx int, cb CommandBlock, attrs map[string]string) error {
+	src := nb.Source
+	// Count the leading backticks of the opening fence so we round-trip an
+	// escalated fence faithfully (e.g. a 4-backtick fence).
+	fenceLen := 0
+	for fenceLen < len(src)-cb.Start && src[cb.Start+fenceLen] == '`' {
+		fenceLen++
+	}
+	if fenceLen < 3 {
+		return fmt.Errorf("unexpected fence length %d", fenceLen)
+	}
+	// The opening fence line ends just before BodyStart (which points at the
+	// first byte of the body content after the opening fence's newline).
+	openLineEnd := cb.BodyStart - 1 // index of the '\n'
+
+	var sb strings.Builder
+	sb.Grow(fenceLen + 16)
+	for i := 0; i < fenceLen; i++ {
+		sb.WriteByte('`')
+	}
+	sb.WriteString("sh")
+	for _, k := range orderedCmdAttrKeys(attrs) {
+		sb.WriteByte(' ')
+		sb.WriteString(k)
+		if v := attrs[k]; v != "" {
+			sb.WriteByte('=')
+			sb.WriteString(v)
+		}
+	}
+	newSrc := spliceBytes(src, cb.Start, openLineEnd, []byte(sb.String()))
+	return nb.reparse(newSrc)
+}
+
+// orderedCmdAttrKeys returns attribute keys in a stable order: `out` first
+// (most relevant to humans), then any remaining keys alphabetically.
+func orderedCmdAttrKeys(attrs map[string]string) []string {
+	out := make([]string, 0, len(attrs))
+	rest := make([]string, 0, len(attrs))
+	for k := range attrs {
+		if k == "out" {
+			out = append(out, k)
+		} else {
+			rest = append(rest, k)
+		}
+	}
+	sort.Strings(rest)
+	return append(out, rest...)
+}
+
+// SetCommand replaces the body of the CommandBlock at blockIdx with newBody.
+// The info string and fence are preserved. A trailing newline is added if
+// newBody doesn't end with one.
+func (nb *Notebook) SetCommand(blockIdx int, newBody string) error {
+	if blockIdx < 0 || blockIdx >= len(nb.Blocks) {
+		return fmt.Errorf("block index %d out of range", blockIdx)
+	}
+	cb, ok := nb.Blocks[blockIdx].(CommandBlock)
+	if !ok {
+		return fmt.Errorf("block at index %d is not a command block", blockIdx)
+	}
+	if !strings.HasSuffix(newBody, "\n") {
+		newBody += "\n"
+	}
+	newSrc := spliceBytes(nb.Source, cb.BodyStart, cb.BodyEnd, []byte(newBody))
+	return nb.reparse(newSrc)
+}
+
+// AppendProse appends a new prose paragraph to the end of the notebook.
+// Used by the in-browser "+ prose" button. An empty text is allowed for the
+// open-in-editor flow.
+func (nb *Notebook) AppendProse(text string) error {
+	if text != "" && !strings.HasSuffix(text, "\n") {
+		text += "\n"
+	}
+	sep := ""
+	src := nb.Source
+	if len(src) > 0 {
+		switch {
+		case !bytes.HasSuffix(src, []byte("\n")):
+			sep = "\n\n"
+		case !bytes.HasSuffix(src, []byte("\n\n")):
+			sep = "\n"
+		}
+	}
+	newSrc := append([]byte{}, src...)
+	newSrc = append(newSrc, sep...)
+	newSrc = append(newSrc, text...)
+	return nb.reparse(newSrc)
+}
+
+// AppendCell appends a new sh command block to the end of the notebook with
+// the given body. A blank line of separation is inserted if needed so the new
+// fence starts at the beginning of a line. The notebook is re-parsed after
+// the splice. An empty body is allowed and produces a fence with no command
+// lines — useful when the caller is about to open the editor on the new cell.
+func (nb *Notebook) AppendCell(body string) error {
+	if body != "" && !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	cell := []byte("```sh\n" + body + "```\n")
+
+	sep := ""
+	src := nb.Source
+	if len(src) > 0 {
+		switch {
+		case !bytes.HasSuffix(src, []byte("\n")):
+			sep = "\n\n"
+		case !bytes.HasSuffix(src, []byte("\n\n")):
+			sep = "\n"
+		}
+	}
+	newSrc := append([]byte{}, src...)
+	newSrc = append(newSrc, sep...)
+	newSrc = append(newSrc, cell...)
+	return nb.reparse(newSrc)
+}
+
+// DeleteBlock removes the block at blockIdx from the notebook. If the block
+// is a CommandBlock paired with an immediately-following OutputBlock (only
+// whitespace between), the output is removed too so the file doesn't end up
+// with an orphaned output. The notebook is re-parsed after the splice.
+func (nb *Notebook) DeleteBlock(blockIdx int) error {
+	if blockIdx < 0 || blockIdx >= len(nb.Blocks) {
+		return fmt.Errorf("block index %d out of range", blockIdx)
+	}
+	start, end := nb.Blocks[blockIdx].Span()
+	if cb, ok := nb.Blocks[blockIdx].(CommandBlock); ok && blockIdx+1 < len(nb.Blocks) {
+		if ob, ok := nb.Blocks[blockIdx+1].(OutputBlock); ok {
+			if isOnlyWhitespace(nb.Source[cb.End:ob.Start]) {
+				end = ob.End
+			}
+		}
+	}
+	newSrc := make([]byte, 0, len(nb.Source)-(end-start))
+	newSrc = append(newSrc, nb.Source[:start]...)
+	newSrc = append(newSrc, nb.Source[end:]...)
+	return nb.reparse(newSrc)
+}
+
 // SetProse replaces the bytes of the ProseBlock at blockIdx with newText.
 // newText is taken verbatim — the caller is responsible for trailing newlines.
 func (nb *Notebook) SetProse(blockIdx int, newText string) error {

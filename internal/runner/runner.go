@@ -36,10 +36,17 @@ type Runner struct {
 }
 
 type Result struct {
-	Output    []byte
-	ExitCode  int
-	Started   time.Time
-	Duration  time.Duration
+	// Stdout and Stderr are the captured streams, ANSI-stripped and capped at
+	// MaxOutputBytes each. Stderr is captured to a per-Run temp file via a
+	// shell-level `2>` redirect inside the persistent pty session.
+	Stdout []byte
+	Stderr []byte
+	// Output is a back-compat alias for Stdout. Prefer the explicit fields.
+	Output   []byte
+	ExitCode int
+	Started  time.Time
+	Duration time.Duration
+	// Truncated is true if EITHER stream hit the cap.
 	Truncated bool
 }
 
@@ -115,23 +122,72 @@ func (r *Runner) Run(ctx context.Context, command string) (Result, error) {
 	// (e.g. shell-side prompt updates that aren't fully silenced).
 	r.drain()
 
-	// Send: <command>\nprintf '\n<sentinel>:%d\n' "$?"\n
-	full := command + "\nprintf '\\n" + r.sentinel + ":%d\\n' \"$?\"\n"
+	// Allocate a per-Run temp file to capture stderr. The shell-level `2>`
+	// redirect inside the brace group sends stderr to this file while stdout
+	// continues through the pty.
+	errFile, err := os.CreateTemp("", "clinote-stderr-*.tmp")
+	if err != nil {
+		return Result{}, fmt.Errorf("temp stderr: %w", err)
+	}
+	errPath := errFile.Name()
+	_ = errFile.Close()
+	defer os.Remove(errPath)
+
+	// Build: { <command>\n} 2> '<errPath>'\nprintf '\n<sentinel>:%d\n' "$?"\n
+	// Braces group multi-line commands so the redirect applies to the whole.
+	full := "{ " + command + "\n} 2> '" + errPath + "'\nprintf '\\n" + r.sentinel + ":%d\\n' \"$?\"\n"
 	if _, err := r.pty.Write([]byte(full)); err != nil {
 		return Result{}, fmt.Errorf("pty write: %w", err)
 	}
 
-	body, exit, truncated, err := r.readUntilSentinel()
+	stdoutRaw, exit, stdoutTrunc, err := r.readUntilSentinel()
 	if err != nil {
 		return Result{}, err
 	}
+
+	// Read stderr file, capped at MaxOutputBytes.
+	stderrRaw, stderrTrunc, err := readCapped(errPath, MaxOutputBytes)
+	if err != nil {
+		return Result{}, fmt.Errorf("read stderr file: %w", err)
+	}
+
+	stdout := stripANSI(stdoutRaw)
+	stderr := stripANSI(stderrRaw)
 	return Result{
-		Output:    stripANSI(body),
+		Stdout:    stdout,
+		Stderr:    stderr,
+		Output:    stdout, // back-compat alias
 		ExitCode:  exit,
 		Started:   started,
 		Duration:  time.Since(started),
-		Truncated: truncated,
+		Truncated: stdoutTrunc || stderrTrunc,
 	}, nil
+}
+
+// readCapped reads up to max bytes from path. Returns the bytes plus a flag
+// indicating whether the file was larger than the cap.
+func readCapped(path string, max int) ([]byte, bool, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	defer f.Close()
+	buf := make([]byte, max)
+	n, err := io.ReadFull(f, buf)
+	switch {
+	case errors.Is(err, io.EOF), errors.Is(err, io.ErrUnexpectedEOF):
+		return buf[:n], false, nil
+	case err != nil:
+		return nil, false, err
+	}
+	// Filled the buffer — check if there's more.
+	extra := make([]byte, 1)
+	m, _ := f.Read(extra)
+	truncated := m > 0
+	return buf, truncated, nil
 }
 
 // drain reads any pty bytes available without blocking. Used between commands

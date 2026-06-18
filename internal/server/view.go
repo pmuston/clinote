@@ -17,6 +17,16 @@ type unit struct {
 	Kind string // "prose", "cell", "orphan"
 	Idx  int    // block index in nb.Blocks for prose/cell; for "orphan", the index of the output block
 
+	// Editable mirrors FrontMatter.Editable so the cell template can show / hide
+	// the edit / delete / format-picker controls without needing access to the
+	// outer page scope.
+	Editable bool
+
+	// StartInEditMode is true when a newly-added cell / prose should render
+	// directly in its editor (instead of view mode). Used by handleAddCell so
+	// the user can type immediately.
+	StartInEditMode bool
+
 	// prose
 	ProseHTML template.HTML
 	Raw       string // for edit textarea
@@ -25,6 +35,10 @@ type unit struct {
 	Command   string
 	HasOutput bool
 	Running   bool
+	// OutHint mirrors the command's `out=` attribute (or "text" if absent).
+	// Drives the type picker so it reflects the command's declared intent
+	// even when there's no paired output yet.
+	OutHint string
 
 	// output (used by cell or orphan)
 	OutputHTML template.HTML
@@ -38,6 +52,7 @@ type unit struct {
 type pageData struct {
 	Title string
 	Path  string
+	Wide  bool
 	Units []unit
 }
 
@@ -49,6 +64,7 @@ func (s *Server) buildPageData() (pageData, error) {
 	return pageData{
 		Title: s.title(),
 		Path:  s.path,
+		Wide:  s.nb.FrontMatter.Width == "full",
 		Units: units,
 	}, nil
 }
@@ -103,11 +119,17 @@ func (s *Server) proseUnit(idx int, p notebook.ProseBlock) (unit, error) {
 }
 
 func (s *Server) cellUnit(idx int, c notebook.CommandBlock, liveIdx int) (unit, error) {
+	hint := c.Attrs["out"]
+	if hint == "" {
+		hint = "text"
+	}
 	u := unit{
-		Kind:    "cell",
-		Idx:     idx,
-		Command: c.Body(s.nb.Source),
-		Running: s.activeIdx == idx,
+		Kind:     "cell",
+		Idx:      idx,
+		Editable: s.nb.FrontMatter.Editable,
+		Command:  c.Body(s.nb.Source),
+		Running:  s.activeIdx == idx,
+		OutHint:  hint,
 	}
 	// Find paired output (immediately following, only whitespace between).
 	if pair, ok := pairedOutput(s.nb, idx); ok {
@@ -130,8 +152,9 @@ func (s *Server) cellUnit(idx int, c notebook.CommandBlock, liveIdx int) (unit, 
 
 func (s *Server) orphanUnit(idx int, o notebook.OutputBlock) unit {
 	u := unit{
-		Kind: "orphan",
-		Idx:  idx,
+		Kind:     "orphan",
+		Idx:      idx,
+		Editable: s.nb.FrontMatter.Editable,
 	}
 	fillOutputFields(&u, o, s.nb.Source)
 	u.OutputHTML = render.Output([]byte(o.Body(s.nb.Source)), u.OutputType)

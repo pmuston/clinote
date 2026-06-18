@@ -287,6 +287,282 @@ func TestWriteFileAtomic(t *testing.T) {
 	}
 }
 
+func TestSetCommand(t *testing.T) {
+	nb := loadFixture(t, "06_command_adjacent_output.md")
+	idx := findFirstCommandIdx(t, nb)
+	if err := nb.SetCommand(idx, "echo replaced\n"); err != nil {
+		t.Fatalf("SetCommand: %v", err)
+	}
+	out := string(nb.Serialize())
+	if !strings.Contains(out, "```sh\necho replaced\n```") {
+		t.Errorf("expected new command body, got:\n%s", out)
+	}
+	if strings.Contains(out, "echo hi") {
+		t.Errorf("old command body should be gone:\n%s", out)
+	}
+	// Info string and pairing preserved: the paired output block should still
+	// follow with the same content.
+	if !strings.Contains(out, "```output type=text exit=0") {
+		t.Errorf("output block should be preserved:\n%s", out)
+	}
+}
+
+func TestSetCommandWithAttrs(t *testing.T) {
+	// Make sure SetCommand on a cell with attrs (e.g., `sh out=csv`) preserves
+	// the info string.
+	src := "```sh out=csv\nold\n```\n"
+	nb, err := Parse(bytes.NewReader([]byte(src)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := nb.SetCommand(0, "new\n"); err != nil {
+		t.Fatal(err)
+	}
+	out := string(nb.Serialize())
+	want := "```sh out=csv\nnew\n```\n"
+	if out != want {
+		t.Errorf("got %q\nwant %q", out, want)
+	}
+}
+
+func TestSetCommandErrorsOnNonCommand(t *testing.T) {
+	nb := loadFixture(t, "04_prose_only.md")
+	if err := nb.SetCommand(0, "x"); err == nil {
+		t.Error("expected error on prose block")
+	}
+}
+
+func TestSetCommandOutType(t *testing.T) {
+	// Adds out= when not present.
+	src := "```sh\necho hi\n```\n"
+	nb, _ := Parse(bytes.NewReader([]byte(src)))
+	if err := nb.SetCommandOutType(0, "csv"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(nb.Serialize()); got != "```sh out=csv\necho hi\n```\n" {
+		t.Errorf("got %q", got)
+	}
+
+	// Replaces existing out=.
+	src2 := "```sh out=csv\necho hi\n```\n"
+	nb2, _ := Parse(bytes.NewReader([]byte(src2)))
+	if err := nb2.SetCommandOutType(0, "tsv"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(nb2.Serialize()); got != "```sh out=tsv\necho hi\n```\n" {
+		t.Errorf("got %q", got)
+	}
+
+	// Removes out= when set to text or empty.
+	src3 := "```sh out=csv\necho hi\n```\n"
+	nb3, _ := Parse(bytes.NewReader([]byte(src3)))
+	if err := nb3.SetCommandOutType(0, "text"); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(nb3.Serialize()); got != "```sh\necho hi\n```\n" {
+		t.Errorf("got %q", got)
+	}
+
+	// Preserves other attrs (and unknown attrs).
+	src4 := "```sh out=text extra=foo unknown\nbody\n```\n"
+	nb4, _ := Parse(bytes.NewReader([]byte(src4)))
+	if err := nb4.SetCommandOutType(0, "csv"); err != nil {
+		t.Fatal(err)
+	}
+	got := string(nb4.Serialize())
+	// out should be first; other attrs preserved (extra, unknown stay).
+	if !strings.HasPrefix(got, "```sh out=csv ") {
+		t.Errorf("expected out=csv first: %q", got)
+	}
+	if !strings.Contains(got, "extra=foo") || !strings.Contains(got, "unknown") {
+		t.Errorf("other attrs lost: %q", got)
+	}
+}
+
+func TestSetCommandOutTypePreservesFenceEscalation(t *testing.T) {
+	// 4-backtick opening fence (because body contains 3-backtick run) must stay 4.
+	src := "````sh\nthis body has ``` inside\n````\n"
+	nb, _ := Parse(bytes.NewReader([]byte(src)))
+	if err := nb.SetCommandOutType(0, "csv"); err != nil {
+		t.Fatal(err)
+	}
+	got := string(nb.Serialize())
+	if !strings.HasPrefix(got, "````sh out=csv\n") {
+		t.Errorf("4-backtick fence not preserved: %q", got)
+	}
+	// Closing fence still 4.
+	if !strings.HasSuffix(got, "````\n") {
+		t.Errorf("closing fence corrupted: %q", got)
+	}
+}
+
+func TestAppendProse(t *testing.T) {
+	nb := loadFixture(t, "05_command_no_output.md")
+	if err := nb.AppendProse("Concluding thoughts.\n"); err != nil {
+		t.Fatalf("AppendProse: %v", err)
+	}
+	out := string(nb.Serialize())
+	if !strings.HasSuffix(strings.TrimRight(out, "\n"), "Concluding thoughts.") {
+		t.Errorf("prose not appended at end:\n%s", out)
+	}
+	// Original command preserved.
+	if !strings.Contains(out, "```sh\necho hi\n```") {
+		t.Errorf("original command lost:\n%s", out)
+	}
+}
+
+func TestFrontMatterWidth(t *testing.T) {
+	src := "---\ntitle: T\nwidth: full\n---\n\nbody\n"
+	nb, err := Parse(bytes.NewReader([]byte(src)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nb.FrontMatter.Width != "full" {
+		t.Errorf("expected Width=full, got %q", nb.FrontMatter.Width)
+	}
+
+	src2 := "---\ntitle: T\n---\n\nbody\n"
+	nb2, _ := Parse(bytes.NewReader([]byte(src2)))
+	if nb2.FrontMatter.Width != "" {
+		t.Errorf("expected empty Width when absent, got %q", nb2.FrontMatter.Width)
+	}
+
+	// Round-trip preserves the field.
+	if !bytes.Equal(nb.Serialize(), []byte(src)) {
+		t.Errorf("round-trip lost width field: %s", nb.Serialize())
+	}
+}
+
+func TestFrontMatterEditable(t *testing.T) {
+	src := "---\ntitle: T\neditable: true\n---\n\nbody\n"
+	nb, err := Parse(bytes.NewReader([]byte(src)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !nb.FrontMatter.Editable {
+		t.Errorf("expected Editable=true")
+	}
+
+	src2 := "---\ntitle: T\n---\n\nbody\n"
+	nb2, err := Parse(bytes.NewReader([]byte(src2)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nb2.FrontMatter.Editable {
+		t.Errorf("expected Editable=false when absent")
+	}
+}
+
+func TestAppendCell(t *testing.T) {
+	// Start from prose only.
+	nb := loadFixture(t, "04_prose_only.md")
+	cmdsBefore, _, _ := countBlocks(nb)
+	if cmdsBefore != 0 {
+		t.Fatalf("setup: expected 0 commands, got %d", cmdsBefore)
+	}
+	if err := nb.AppendCell("echo from-append\n"); err != nil {
+		t.Fatalf("AppendCell: %v", err)
+	}
+	cmds, _, _ := countBlocks(nb)
+	if cmds != 1 {
+		t.Errorf("expected 1 command after append, got %d", cmds)
+	}
+	out := string(nb.Serialize())
+	if !strings.Contains(out, "```sh\necho from-append\n```") {
+		t.Errorf("appended cell missing or malformed: %s", out)
+	}
+	// Original prose must still be there.
+	if !strings.Contains(out, "Some prose.") {
+		t.Errorf("original prose lost: %s", out)
+	}
+	// Result should be round-trip stable.
+	nb2, err := Parse(bytes.NewReader([]byte(out)))
+	if err != nil {
+		t.Fatalf("re-parse: %v", err)
+	}
+	if !bytes.Equal([]byte(out), nb2.Serialize()) {
+		t.Error("appended notebook not round-trip stable")
+	}
+}
+
+func TestDeleteBlockProse(t *testing.T) {
+	nb := loadFixture(t, "04_prose_only.md")
+	idx := -1
+	for i, b := range nb.Blocks {
+		if _, ok := b.(ProseBlock); ok {
+			idx = i
+			break
+		}
+	}
+	if err := nb.DeleteBlock(idx); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(nb.Serialize()); got != "" {
+		t.Errorf("expected empty notebook after deleting only prose, got %q", got)
+	}
+}
+
+func TestDeleteBlockCommandRemovesPairedOutput(t *testing.T) {
+	nb := loadFixture(t, "06_command_adjacent_output.md")
+	idx := findFirstCommandIdx(t, nb)
+	if err := nb.DeleteBlock(idx); err != nil {
+		t.Fatal(err)
+	}
+	cmds, outs, _ := countBlocks(nb)
+	if cmds != 0 || outs != 0 {
+		t.Errorf("expected 0 cmds and 0 outs after deleting paired cell, got cmds=%d outs=%d", cmds, outs)
+	}
+}
+
+func TestDeleteBlockOrphanLeavesOutputAlone(t *testing.T) {
+	// fixture 8: cmd, prose, output (orphan).
+	// Deleting the cmd should NOT remove the orphan output (separated by prose).
+	nb := loadFixture(t, "08_command_prose_output_orphan.md")
+	idx := findFirstCommandIdx(t, nb)
+	if err := nb.DeleteBlock(idx); err != nil {
+		t.Fatal(err)
+	}
+	cmds, outs, _ := countBlocks(nb)
+	if cmds != 0 {
+		t.Errorf("expected 0 cmds, got %d", cmds)
+	}
+	if outs != 1 {
+		t.Errorf("expected orphan output to survive, got outs=%d", outs)
+	}
+}
+
+func TestDeleteBlockErrorsOnInvalidIdx(t *testing.T) {
+	nb := loadFixture(t, "05_command_no_output.md")
+	if err := nb.DeleteBlock(-1); err == nil {
+		t.Error("expected error on -1")
+	}
+	if err := nb.DeleteBlock(len(nb.Blocks)); err == nil {
+		t.Error("expected error on out-of-range")
+	}
+}
+
+func TestAppendCellEmptyBody(t *testing.T) {
+	nb := loadFixture(t, "01_empty.md")
+	if err := nb.AppendCell(""); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(nb.Serialize()); got != "```sh\n```\n" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestAppendCellToEmpty(t *testing.T) {
+	nb := loadFixture(t, "01_empty.md")
+	if err := nb.AppendCell("ls -la\n"); err != nil {
+		t.Fatalf("AppendCell: %v", err)
+	}
+	out := string(nb.Serialize())
+	want := "```sh\nls -la\n```\n"
+	if out != want {
+		t.Errorf("got %q\nwant %q", out, want)
+	}
+}
+
 // After SetOutput, Serialize should still produce well-formed bytes that
 // re-parse cleanly (round-trip preserves the new state).
 func TestSetOutputThenRoundTrip(t *testing.T) {

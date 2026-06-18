@@ -17,6 +17,15 @@ type FrontMatter struct {
 	Title   string
 	Created time.Time
 	Shell   string
+	// Editable, when true, unlocks in-browser editing of sh command bodies.
+	// Defaults to false: the safe choice for shared / demo notebooks where
+	// the cells are meant to be runnable as-written.
+	Editable bool
+
+	// Width controls the rendered notebook column. "full" → use the full window
+	// width (no max-width cap), anything else (including empty) → the default
+	// narrow column suitable for prose reading.
+	Width string
 
 	Raw     []byte
 	Present bool

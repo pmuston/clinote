@@ -1,6 +1,6 @@
 // Package render converts output-block bodies into safe HTML for the browser.
-// Text output gets ANSI-to-HTML conversion; CSV and JSONL render as sortable
-// tables. Each renderer escapes user content.
+// Text output gets ANSI-to-HTML conversion; CSV, TSV and JSONL render as
+// sortable tables. Each renderer escapes user content.
 package render
 
 import (
@@ -15,7 +15,7 @@ import (
 	"strings"
 )
 
-// MaxRenderRows caps the rows rendered into the browser table for CSV/JSONL
+// MaxRenderRows caps the rows rendered into the browser table for CSV/TSV/JSONL
 // (§7.4). The full data remains in the .md file.
 const MaxRenderRows = 1000
 
@@ -28,6 +28,8 @@ func Output(body []byte, declaredType string) template.HTML {
 	switch typ {
 	case "csv":
 		return CSV(body)
+	case "tsv":
+		return TSV(body)
 	case "jsonl":
 		return JSONL(body)
 	default:
@@ -57,8 +59,11 @@ func Sniff(body []byte) string {
 	if allJSONObjects {
 		return "jsonl"
 	}
-	if len(lines) >= 2 && isConsistentCSV(lines) {
+	if len(lines) >= 2 && isConsistentDelimited(lines, ',') {
 		return "csv"
+	}
+	if len(lines) >= 2 && isConsistentDelimited(lines, '\t') {
+		return "tsv"
 	}
 	return "text"
 }
@@ -79,10 +84,14 @@ func looksLikeJSONObject(l []byte) bool {
 	return len(trimmed) >= 2 && trimmed[0] == '{' && trimmed[len(trimmed)-1] == '}'
 }
 
-func isConsistentCSV(lines [][]byte) bool {
+// isConsistentDelimited reports whether every line parses into the same
+// number of ≥2 fields when split on sep. Used by Sniff to detect CSV / TSV.
+func isConsistentDelimited(lines [][]byte, sep rune) bool {
 	var cols int
 	for i, l := range lines {
-		rec, err := csv.NewReader(bytes.NewReader(l)).Read()
+		r := csv.NewReader(bytes.NewReader(l))
+		r.Comma = sep
+		rec, err := r.Read()
 		if err != nil {
 			return false
 		}
@@ -99,15 +108,26 @@ func isConsistentCSV(lines [][]byte) bool {
 }
 
 // Text renders plain text output, converting ANSI SGR sequences to HTML spans
-// and escaping the rest. The output is meant to live inside <pre>.
+// and escaping the rest. The output is meant to live inside <pre>. Leading
+// and trailing newlines are trimmed so the surrounding <pre>'s padding
+// provides the visual spacing — without this, a trailing "\n" in the body
+// shows up as a blank line and looks like extra padding.
 func Text(body []byte) template.HTML {
+	body = bytes.Trim(body, "\n\r")
 	return template.HTML(ansiToHTML(body))
 }
 
-// CSV renders a CSV body as a sortable HTML table. The first row is the header;
+// CSV renders a CSV body as a sortable HTML table. First row is the header;
 // rows beyond MaxRenderRows are dropped with a notice appended.
-func CSV(body []byte) template.HTML {
-	rec, err := csv.NewReader(bytes.NewReader(body)).ReadAll()
+func CSV(body []byte) template.HTML { return renderDelimited(body, ',') }
+
+// TSV renders a tab-separated body as a sortable HTML table, same rules as CSV.
+func TSV(body []byte) template.HTML { return renderDelimited(body, '\t') }
+
+func renderDelimited(body []byte, sep rune) template.HTML {
+	r := csv.NewReader(bytes.NewReader(body))
+	r.Comma = sep
+	rec, err := r.ReadAll()
 	if err != nil || len(rec) == 0 {
 		return Text(body)
 	}

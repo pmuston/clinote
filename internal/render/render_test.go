@@ -16,8 +16,10 @@ func TestSniff(t *testing.T) {
 		{"jsonl", `{"a":1}` + "\n" + `{"a":2}` + "\n", "jsonl"},
 		{"jsonl one row", `{"a":1}` + "\n", "jsonl"},
 		{"csv", "a,b,c\n1,2,3\n4,5,6\n", "csv"},
+		{"tsv", "a\tb\tc\n1\t2\t3\n4\t5\t6\n", "tsv"},
 		{"csv single column not enough", "1\n2\n3\n", "text"},
 		{"csv inconsistent cols", "a,b\n1,2,3\n", "text"},
+		{"tsv inconsistent cols", "a\tb\n1\t2\t3\n", "text"},
 		{"mixed garbage", "hello\nworld\n{not json", "text"},
 	}
 	for _, tt := range tests {
@@ -97,6 +99,34 @@ func TestCSVEscapesCells(t *testing.T) {
 	out := string(CSV([]byte(body)))
 	if strings.Contains(out, "<script>") {
 		t.Errorf("CSV cell content not escaped: %q", out)
+	}
+}
+
+func TestTSVRendersTable(t *testing.T) {
+	body := "user_id\temail\trole\n1042\talice@example.com\teng\n2099\tbob@example.com\tmgr\n"
+	out := string(TSV([]byte(body)))
+	if !strings.Contains(out, "<table") {
+		t.Errorf("expected table, got: %q", out)
+	}
+	if !strings.Contains(out, "<th data-col=\"0\">user_id</th>") {
+		t.Errorf("missing first header: %q", out)
+	}
+	if !strings.Contains(out, "<td>alice@example.com</td>") {
+		t.Errorf("missing data cell: %q", out)
+	}
+	// Commas in cells should NOT be treated as separators.
+	bodyWithCommas := "label\tvalues\nfoo\ta, b, c\n"
+	outC := string(TSV([]byte(bodyWithCommas)))
+	if !strings.Contains(outC, "<td>a, b, c</td>") {
+		t.Errorf("TSV must not split on commas inside fields: %q", outC)
+	}
+}
+
+func TestOutputDispatchTSV(t *testing.T) {
+	body := "a\tb\n1\t2\n"
+	out := string(Output([]byte(body), "tsv"))
+	if !strings.Contains(out, "<table") {
+		t.Errorf("expected table for declared tsv: %q", out)
 	}
 }
 
