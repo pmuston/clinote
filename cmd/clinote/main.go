@@ -23,19 +23,35 @@ import (
 	"github.com/pmuston/clinote/internal/server"
 )
 
+// version is stamped at build time via -ldflags "-X main.version=...". When
+// unset (e.g., `go run`), it reports "dev" so the binary is still useful.
+var version = "dev"
+
 func main() {
-	// Subcommand dispatch: `clinote new <path>` scaffolds a new notebook.
-	if len(os.Args) >= 2 && os.Args[1] == "new" {
-		if err := newCmd(os.Args[2:]); err != nil {
-			fmt.Fprintln(os.Stderr, "clinote:", err)
-			os.Exit(1)
+	// Subcommand dispatch.
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "new":
+			if err := newCmd(os.Args[2:]); err != nil {
+				fmt.Fprintln(os.Stderr, "clinote:", err)
+				os.Exit(1)
+			}
+			return
+		case "version", "--version", "-v":
+			fmt.Println(version)
+			return
 		}
-		return
 	}
 
 	flag.Usage = usage
 	noBrowser := flag.Bool("no-browser", false, "Do not open the browser")
+	showVersion := flag.Bool("version", false, "Print version and exit")
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	if err := run(flag.Arg(0), *noBrowser); err != nil {
 		fmt.Fprintln(os.Stderr, "clinote:", err)
@@ -47,6 +63,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "Usage:")
 	fmt.Fprintln(os.Stderr, "  clinote [flags] [path/to/notebook.md]   open a notebook")
 	fmt.Fprintln(os.Stderr, "  clinote new [flags] <path>              create a notebook and open it")
+	fmt.Fprintln(os.Stderr, "  clinote version                         print version and exit")
 	fmt.Fprintln(os.Stderr, "  clinote                                 list .md files in cwd")
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Flags:")

@@ -8,9 +8,22 @@ The on-disk file stays plain CommonMark — readable, grep-able, GitHub-renderab
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```sh
+brew tap pmuston/tap
+brew install pmuston/tap/clinote
+```
+
+Upgrade later with `brew upgrade pmuston/tap/clinote`.
+
+### From source (Go)
+
 ```sh
 go install github.com/pmuston/clinote/cmd/clinote@latest
 ```
+
+Requires Go 1.25+. Use this if you don't have Homebrew or want to track `main`.
 
 ## Usage
 
