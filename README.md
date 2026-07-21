@@ -12,8 +12,12 @@ The on-disk file stays plain CommonMark — readable, grep-able, GitHub-renderab
 
 ```sh
 brew tap pmuston/tap
+brew trust pmuston/tap      # required for third-party taps
 brew install pmuston/tap/clinote
 ```
+
+Recent Homebrew refuses to install from an untrusted third-party tap, and the
+error it prints doesn't make the fix obvious — hence the `brew trust` line.
 
 Upgrade later with `brew upgrade pmuston/tap/clinote`.
 

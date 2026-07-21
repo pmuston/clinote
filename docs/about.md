@@ -31,7 +31,9 @@ Multi-user / collaboration, CI / headless execution, streaming output, file watc
 ## At a glance
 
 ```sh
-go install github.com/pmuston/clinote/cmd/clinote@latest
+brew tap pmuston/tap && brew trust pmuston/tap
+brew install pmuston/tap/clinote
+
 clinote new notebook.md
 # → opens the browser; click Run on the example cell; output appears in the file
 ```

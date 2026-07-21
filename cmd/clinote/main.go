@@ -21,11 +21,16 @@ import (
 	"github.com/pmuston/clinote/internal/notebook"
 	"github.com/pmuston/clinote/internal/runner"
 	"github.com/pmuston/clinote/internal/server"
+	"github.com/pmuston/clinote/internal/version"
 )
 
-// version is stamped at build time via -ldflags "-X main.version=...". When
-// unset (e.g., `go run`), it reports "dev" so the binary is still useful.
-var version = "dev"
+// versionLine is what `clinote version` prints. The leading binary name is not
+// decoration: the Homebrew formula's test block asserts on "clinote v", and a
+// running instance identifying itself by name is what makes a stale deployment
+// obvious in logs.
+func versionLine() string {
+	return "clinote v" + version.String()
+}
 
 func main() {
 	// Subcommand dispatch.
@@ -38,7 +43,7 @@ func main() {
 			}
 			return
 		case "version", "--version", "-v":
-			fmt.Println(version)
+			fmt.Println(versionLine())
 			return
 		}
 	}
@@ -49,7 +54,7 @@ func main() {
 	flag.Parse()
 
 	if *showVersion {
-		fmt.Println(version)
+		fmt.Println(versionLine())
 		return
 	}
 

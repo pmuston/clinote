@@ -1,189 +1,305 @@
 # Releasing clinote (Homebrew tap distribution)
 
-This document covers how clinote is shipped to users via a Homebrew tap.
+How clinote is shipped to users via Homebrew. The workflow follows the
+`homebrew-tap-release` skill, with one documented deviation (see
+[Where the assets live](#where-the-assets-live)).
 
 ## Distribution model
 
-Users will install with:
+Users install with:
 
 ```sh
 brew tap pmuston/tap
+brew trust pmuston/tap      # required for third-party taps
 brew install pmuston/tap/clinote
 ```
 
-`pmuston/tap` is a shared Homebrew tap that hosts formulas for several utilities — clinote is just one of them. Homebrew strips the `homebrew-` prefix from tap repo names, so `brew tap pmuston/tap` clones `github.com/pmuston/homebrew-tap`.
+`pmuston/tap` is a shared Homebrew tap hosting formulae for several utilities —
+clinote is one of them. Homebrew strips the `homebrew-` prefix when resolving
+tap names, so `brew tap pmuston/tap` clones `github.com/pmuston/homebrew-tap`.
 
 Behind the scenes:
 
-1. clinote's source lives in `github.com/pmuston/clinote` (this repo).
-2. The shared tap at `github.com/pmuston/homebrew-tap` holds the Homebrew formula (`Formula/clinote.rb`), alongside formulas for your other utilities.
-3. Each release publishes pre-built tarballs for 4 platforms as GitHub release assets, plus a `checksums.txt`. The formula references those URLs by SHA256.
+1. Source lives in `github.com/pmuston/clinote` (this repo, **public**).
+2. Each release publishes pre-built tarballs for four platforms plus a
+   `checksums.txt` as GitHub release assets **on this repo**.
+3. The shared tap holds only `Formula/clinote.rb`, which references those asset
+   URLs by SHA256.
 
-This model means **users don't need Go installed** — they get a pre-built static binary.
+Users don't need Go installed — they get a pre-built static binary.
 
-## Prerequisites (one-time)
+### Where the assets live
 
-### 1. LICENSE at the repo root
+The skill hosts release assets on the *tap* rather than the source repo, because
+it assumes a **private** source whose assets would 404 for everyone but the
+owner. clinote's source is public, so it hosts its own releases: tags and
+release notes then sit next to the code they describe, and the shared tap stays
+formula-only.
 
-Already in place — [LICENSE](../LICENSE), MIT. The generated formula declares `license "MIT"` to match. If you ever switch licenses, update both files together.
+`pmuston/graphdb` is private and correctly keeps the skill's tap-hosted
+arrangement. If clinote ever goes private, move the assets and set
+`RELEASE_REPO` in the build script to the tap.
 
-### 2. Create the shared tap repository
+Note that a shared tap only avoids tag collisions because it holds no releases.
+If assets ever move there, tags must be namespaced per tool (`clinote-v0.1.1`),
+since several tools would otherwise compete for `v0.1.1` in one repo.
 
-On GitHub, create an empty public repo called `homebrew-tap` under your user:
+## Prerequisites
 
-```
-github.com/pmuston/homebrew-tap
-```
+All one-time setup is already done:
 
-The `homebrew-` prefix is mandatory — Homebrew strips it when resolving names, so `brew tap pmuston/tap` looks for `homebrew-tap`. Pick this once for all your utilities; each formula goes under `Formula/` in that single repo.
-
-The tap's layout will end up like:
-
-```
-homebrew-tap/
-└── Formula/
-    ├── clinote.rb
-    ├── other-tool.rb
-    └── ...
-```
-
-Clone the tap locally next to this repo; on each release you'll drop the freshly-generated formula into `Formula/`.
-
-### 3. (Optional but recommended) `gh` CLI
-
-```sh
-brew install gh
-gh auth login
-```
-
-The release script doesn't depend on `gh`, but the suggested commands at the end use it.
+- **[LICENSE](../LICENSE)** — MIT, matching the `license "MIT"` the formula
+  declares. Change both together or neither.
+- **Version constant** — [internal/version/version.go](../internal/version/version.go).
+- **`version` subcommand** — prints `clinote v<version> (<revision>)`. The
+  formula's `test` block asserts on this, so it is load-bearing.
+- **The tap** — `github.com/pmuston/homebrew-tap`, public, with `Formula/`.
+- **`/dist` gitignored** — not cosmetic; see [Why `dist/` must be
+  ignored](#why-dist-must-be-ignored).
+- **`gh` CLI** — `brew install gh && gh auth login`.
 
 ## Per-release workflow
 
-### 1. Tag the release
+Order matters at every step. Getting it wrong produces a broken install for
+anyone who taps in the gap.
 
-Pick a version following semver:
+### 1. Bump the version constant and commit
 
-```sh
-git tag v0.1.0
-git push origin v0.1.0
+```go
+// internal/version/version.go
+const Version = "0.1.1"
 ```
 
-### 2. Build the artifacts
+The version is single-sourced here so the binary, the build script and the
+formula cannot disagree. Bump it whenever the interface changes, not only for
+features — a running instance has no other way to identify itself.
+
+Commit this **before** building. A dirty tree stamps the binary `modified`.
+
+### 2. Verify clean, then tag and push
 
 ```sh
-./scripts/release.sh v0.1.0
+git status --short        # must be empty
+git tag -a v0.1.1 -m "clinote v0.1.1"
+git push origin main && git push origin v0.1.1
 ```
 
-The script produces:
+Push **named tags only**. `git push --tags` pushes every local tag, including
+scratch tags never meant to be public.
+
+Tag every released version, even one whose binaries ship inside a later release
+— a gap means nobody can check out what a given version contained.
+
+### 3. Build
+
+```sh
+./scripts/build-release.sh
+```
+
+No arguments: the version comes from the constant. Output:
 
 ```
 dist/
-  clinote-v0.1.0-darwin-arm64.tar.gz
-  clinote-v0.1.0-darwin-amd64.tar.gz
-  clinote-v0.1.0-linux-amd64.tar.gz
-  clinote-v0.1.0-linux-arm64.tar.gz
+  clinote-v0.1.1-darwin-arm64.tar.gz
+  clinote-v0.1.1-darwin-amd64.tar.gz
+  clinote-v0.1.1-linux-amd64.tar.gz
+  clinote-v0.1.1-linux-arm64.tar.gz
   checksums.txt
-  clinote.rb            ← Homebrew formula, ready to drop into the tap repo
+  THIRD-PARTY-NOTICES.md   ← also bundled inside every tarball
+  clinote.rb               ← formula, ready for the tap
 ```
 
-Each tarball contains:
+Each tarball contains a top-level `clinote-v0.1.1-<os>-<arch>/` directory
+holding the binary, `LICENSE`, `README.md` and `THIRD-PARTY-NOTICES.md`.
 
-- The `clinote` binary (statically linked, CGO disabled, `-s -w` stripped).
-- `LICENSE` and `README.md` if present at the repo root.
-
-The version is embedded in the binary via `-ldflags "-X main.version=v0.1.0"`, so `clinote version` reports the right thing.
-
-### 3. Publish the GitHub release
+**Confirm the binary self-identifies before going further:**
 
 ```sh
-gh release create v0.1.0 \
-  --title "clinote v0.1.0" \
-  --notes "Release notes here." \
-  dist/*.tar.gz dist/checksums.txt
+tar xzf dist/clinote-v0.1.1-darwin-arm64.tar.gz -C /tmp
+/tmp/clinote-v0.1.1-darwin-arm64/clinote version
+# → clinote v0.1.1 (a1b2c3d4e5f6)     ← no ", modified"
 ```
 
-…or use the web UI: create a release for the `v0.1.0` tag and upload all five files as assets.
+`modified` means the tree was dirty at build time and the artifact matches no
+commit. Rebuild from a clean tree; do not ship it.
 
-### 4. Update the tap
+### 4. Publish the GitHub release — before the formula
 
 ```sh
-cd ../homebrew-tap
-mkdir -p Formula     # first time only
+gh release create v0.1.1 dist/clinote-v0.1.1-*.tar.gz dist/checksums.txt \
+  --repo pmuston/clinote --title "clinote v0.1.1" --notes "..."
+```
+
+The formula's URLs point at these assets. Publishing the formula first leaves a
+window where anyone installing gets a 404. Verify the upload landed:
+
+```sh
+gh release view v0.1.1 --repo pmuston/clinote --json assets --jq '.assets[].name'
+```
+
+Expect all five.
+
+### 5. Publish the formula
+
+```sh
+cd ../homebrew-tap && git pull --ff-only
 cp ../clinote/dist/clinote.rb Formula/clinote.rb
-git add Formula/clinote.rb
-git commit -m "clinote v0.1.0"
-git push
+git add Formula/clinote.rb && git commit -m "clinote 0.1.1" && git push
 ```
 
-### 5. Verify
-
-From any machine (or a fresh shell so brew sees the new formula):
+### 6. Verify the path a user actually takes
 
 ```sh
-brew update
-brew install pmuston/tap/clinote
-clinote version           # should print v0.1.0
+brew update && brew upgrade pmuston/tap/clinote   # or `brew install` first time
+clinote version                                    # matches the tag, clean revision
 ```
 
-If a previous version is installed, use `brew upgrade pmuston/tap/clinote` instead.
+Then exercise whatever this release changed, on the **brew-installed binary** —
+not your build tree. This is what catches a formula pointing at stale assets,
+and it's worth doing even when the code is obviously fine, because it tests the
+distribution rather than the code.
 
-## How the script works
+## Release notes worth reading
 
-`scripts/release.sh` is a thin wrapper around `go build`. For each platform:
+Write for someone deciding whether to upgrade. Lead with what changed for
+*them*, not the commit list. Spell out the symptom for any silent-wrong-answer
+bug, because anyone affected doesn't know they were. Call out behaviour changes
+explicitly, even backward-compatible ones. Always include the upgrade command.
 
-1. `GOOS=<os> GOARCH=<arch> CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=<v>" ./cmd/clinote`
-2. Stages the binary + LICENSE + README in a tempdir, tarballs it.
-3. Computes the SHA256 (via `shasum -a 256`, which is available on macOS and most Linux).
-4. After all four builds, writes `checksums.txt` and a `clinote.rb` formula populated with the URLs and checksums.
+## How the build script works
 
-CGO is disabled deliberately: clinote has no C dependencies, and a CGO-free binary is fully static and works across the broadest range of Linux distros (no glibc version surprises).
-
-## Verifying a release
-
-After publishing, do a clean install in a sandbox to verify:
+`scripts/build-release.sh` is adapted from the skill's stock script. For each
+platform it runs:
 
 ```sh
-brew uninstall clinote 2>/dev/null || true
-brew untap pmuston/tap 2>/dev/null || true
-brew tap pmuston/tap
-brew install pmuston/tap/clinote
-clinote version
-clinote --help
+CGO_ENABLED=0 GOOS=<os> GOARCH=<arch> go build -trimpath -ldflags "-s -w" ./cmd/clinote
 ```
 
-For deeper testing, run the formula's audit:
+then stages the binary plus `LICENSE`, `README.md` and `THIRD-PARTY-NOTICES.md`,
+tarballs it, and records the SHA256. After all four, it writes `checksums.txt`
+and a `clinote.rb` populated with real URLs and checksums.
+
+CGO is off deliberately: clinote has no C dependencies, and a CGO-free binary is
+fully static and works across the broadest range of Linux distros with no glibc
+surprises. `-trimpath` strips local paths but **preserves** Go's VCS stamps,
+which is how the binary reports its own revision via `debug.ReadBuildInfo()`.
+
+Two additions over the stock script:
+
+- Runs `go test ./...` first — never ship a release that fails its own tests.
+- Generates `THIRD-PARTY-NOTICES.md` (below).
+
+### Why `dist/` must be ignored
+
+Go reads the working tree's state when it compiles, and the script creates
+`dist/` before building. If `dist/` were untracked but not ignored, its mere
+existence would dirty the tree at exactly that moment — stamping every binary
+`modified` from an otherwise spotless commit. Silent, and it makes the artifact
+unattributable. The script refuses to run if `dist/` isn't ignored.
+
+## Third-party notices
+
+MIT and BSD-3-Clause both require reproducing their copyright and permission
+notices in redistributions — **including binary form** — and the release binary
+statically links those dependencies. Every tarball therefore ships a generated
+`THIRD-PARTY-NOTICES.md` with their full license texts.
+
+The module set comes from:
 
 ```sh
-brew audit --strict pmuston/tap/clinote
-brew test pmuston/tap/clinote      # runs the test block from the formula
+go list -deps -f '{{if .Module}}...{{end}}' ./cmd/clinote
 ```
 
-## Updating an existing release (rare)
+Using `go list -deps` on the binary's package rather than `go list -m all` means
+the notices cover **exactly what gets linked**: test-only dependencies such as
+`testify` are excluded, and stdlib packages self-exclude because they report no
+module. License texts are read from the local module cache via `{{.Module.Dir}}`,
+so no external tooling is needed and it works offline after `go mod download`.
 
-If you need to ship a fix without bumping version (e.g., a bad tarball was uploaded):
+Two entries are special-cased:
 
-1. Delete the GitHub release assets.
-2. Re-run `./scripts/release.sh v0.1.0`.
-3. Re-upload to the same release.
-4. Update the tap formula — checksums will have changed, so users will see a `brew upgrade` even though the version label is the same.
+- **Go standard library** — BSD-3-Clause, compiled into every Go binary. Includes
+  `$GOROOT/LICENSE` when the toolchain ships it; some packaged distributions
+  (Homebrew among them) omit it, in which case the file records the license and
+  links to <https://go.dev/LICENSE> rather than inventing the text.
+- **htmx** — the vendored `internal/server/static/htmx.min.js` is 0BSD
+  (Zero-Clause BSD), which imposes no attribution requirement at all. Listed
+  purely so readers know what's in the binary.
 
-Cleaner: just cut a `v0.1.1`.
+If a linked module has no discoverable license file the script **fails the
+build** rather than shipping incomplete attribution. Adding or upgrading a
+dependency needs no manual step.
+
+## Licensing
+
+The formula's `license` must match the LICENSE the tarball actually ships. They
+are checked by different people at different times, so a mismatch survives
+indefinitely — `brew audit --strict` passes either way. It surfaces later in the
+SBOM Homebrew writes at install time:
+
+```sh
+python3 -c "
+import json; d=json.load(open('$(brew --cellar clinote)/0.1.1/sbom.spdx.json'))
+print([(p['name'], p.get('licenseConcluded')) for p in d['packages']])"
+```
+
+The SBOM is written at **install** time, so correcting a formula doesn't update
+an existing install — that machine needs `brew reinstall` before a compliance
+scan sees the change.
+
+## Failure modes
+
+**404 on the tarball** — the formula was published before the release, or an
+asset upload failed. Check with `gh release view <tag> --repo pmuston/clinote
+--json assets --jq '.assets[].name'` and expect all five. Upload what's missing
+with `gh release upload`.
+
+**Binary reports `(abc123, modified)`** — the tree was dirty when Go compiled
+it, so the artifact matches no commit. Commit or stash, rebuild, re-upload the
+assets, update the formula's checksums. The non-obvious cause is `dist/` not
+being gitignored. Always check this on an extracted tarball *before* creating
+the release — it's unfixable in place afterwards.
+
+**Binary reports no revision at all** — `debug.ReadBuildInfo()` found no VCS
+stamps: built outside a git checkout, from a source archive, or with
+`-buildvcs=false`. Build from a real clone.
+
+**`brew info` shows the wrong version, or upgrade is a no-op** — Homebrew caches
+tap metadata; `brew update` first. If it persists, confirm the formula on the
+tap's default branch really has the new version and URLs. Committing the formula
+and forgetting to push is easy.
+
+**A running instance reports an older version than expected** — usually not a
+release bug. An old process is still running, or a second install is earlier in
+`PATH`. Check `which -a clinote`. Trust what the running binary says about
+itself over what you believe you deployed; that's what the `version` subcommand
+is for.
+
+**SHA256 mismatch on install** — the assets on GitHub don't match what the
+formula claims. Rebuild and re-upload so they agree.
+
+**`brew install` fails on an untrusted tap** — recent Homebrew requires
+`brew trust pmuston/tap`. Not a formula bug, but the error text doesn't make the
+fix obvious, which is why it's in both READMEs.
+
+**`brew style` reports Sorbet/FrozenStringLiteral/Documentation offenses** — an
+artifact of linting a formula by path instead of inside a tap. A known-good
+formula from an existing tap produces the identical four. Not a defect.
+
+**Binary won't run on a user's Mac** — Gatekeeper, because the binary is
+unsigned. Users can clear quarantine with
+`xattr -d com.apple.quarantine $(which clinote)`. Apple Developer ID signing and
+notarization would fix it properly; out of scope for now.
+
+**Linux "GLIBC not found"** — shouldn't happen with `CGO_ENABLED=0`, since the
+binary doesn't link libc at all. Check nothing re-enabled CGO via the
+environment.
 
 ## Alternative: GoReleaser
 
-If the manual workflow becomes a chore, [GoReleaser](https://goreleaser.com/) automates everything in this document — cross-compile, tarball, checksum, GitHub release, AND Homebrew formula generation in the tap repo. Triggered by a tag push, usually via GitHub Actions.
+[GoReleaser](https://goreleaser.com/) automates everything here — cross-compile,
+tarball, checksum, GitHub release, and formula generation in the tap — triggered
+by a tag push via GitHub Actions.
 
-For v1 we keep the bash script: it's auditable, has no external dependencies beyond Go itself, and the per-release work is small enough not to need automation yet. Switch to GoReleaser later if release cadence picks up.
-
-## Troubleshooting
-
-**`brew install` says "no available formula"** — make sure `homebrew-clinote` is public, that `Formula/clinote.rb` is committed at the repo root, and that you ran `brew tap pmuston/clinote` before `brew install`.
-
-**`brew audit` complains about `license`** — the LICENSE file at the source repo root and the `license "MIT"` line in `clinote.rb` must match. Update either to fix the mismatch.
-
-**SHA256 mismatch on install** — the tarball on GitHub doesn't match what the formula says. Re-run `./scripts/release.sh` and re-upload the assets so they match the new formula.
-
-**Binary doesn't run on user's Mac** — could be Gatekeeper because the binary is unsigned. Users can clear the quarantine attribute with `xattr -d com.apple.quarantine $(which clinote)`. For broader distribution, set up Apple Developer ID signing + notarization (out of scope for v1).
-
-**Linux user reports "GLIBC not found"** — shouldn't happen with `CGO_ENABLED=0` (the binary doesn't link against libc at all). If it does, double-check that the build didn't accidentally re-enable CGO via an environment override.
+The bash script stays for now: it's auditable, needs nothing beyond Go itself,
+and the per-release work is small. Switch if the cadence picks up.

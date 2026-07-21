@@ -11,6 +11,7 @@ A walk-through of clinote from first install to power-user patterns. For a one-p
 - [Working in the browser](#working-in-the-browser)
   - [Running cells](#running-cells)
   - [The persistent shell](#the-persistent-shell)
+  - [Defining macros and reusable functions](#defining-macros-and-reusable-functions)
   - [Editing prose](#editing-prose)
   - [Editing sh cells (`editable: true`)](#editing-sh-cells-editable-true)
   - [Adding cells](#adding-cells)
@@ -48,27 +49,47 @@ It's not for:
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```sh
+brew tap pmuston/tap
+brew trust pmuston/tap      # required for third-party taps
+brew install pmuston/tap/clinote
+```
+
+You get a pre-built static binary — no Go toolchain needed. Recent Homebrew
+refuses to install from an untrusted third-party tap, and the error it prints
+doesn't make the fix obvious, hence the `brew trust` line.
+
+Upgrade later with `brew upgrade pmuston/tap/clinote`.
+
+### From source
+
 ```sh
 go install github.com/pmuston/clinote/cmd/clinote@latest
 ```
 
-Requires Go 1.25+. The binary lands in `$GOBIN` (or `$GOPATH/bin`).
+Requires Go 1.25+. The binary lands in `$GOBIN` (or `$GOPATH/bin`). Use this if
+you don't have Homebrew or want to track `main`.
 
-If the repo is private, set:
-
-```sh
-go env -w GOPRIVATE=github.com/pmuston/*
-git config --global url."git@github.com:".insteadOf "https://github.com/"
-go install github.com/pmuston/clinote/cmd/clinote@latest
-```
-
-To install from a local clone (typical during development):
+From a local clone (typical during development):
 
 ```sh
-git clone <repo>
+git clone https://github.com/pmuston/clinote
 cd clinote
 go install ./cmd/clinote
 ```
+
+Check which build you're running at any time:
+
+```sh
+clinote version
+# → clinote v0.1.0 (a1b2c3d4e5f6)
+```
+
+The revision is the commit the binary was built from. A `, modified` suffix
+means it was built from a dirty working tree — expected for local builds, but
+never for a released one.
 
 ## Your first notebook
 
@@ -178,6 +199,49 @@ This works for:
 - `set` options.
 
 The session ends when you close clinote.
+
+### Defining macros and reusable functions
+
+Because the shell persists, you can define shell functions once and call them from any later cell. This is the idiomatic way to make short "macros" for repetitive commands — no special clinote feature needed.
+
+Put your definitions in the **first cell** of the notebook. A single cell can hold as many statements as you like:
+
+````markdown
+```sh
+# Post a Cypher query to a local service:
+cy() { curl -s -XPOST localhost:8080/cypher -d "$1"; echo; }
+
+# Pretty-print JSON from a URL:
+j() { curl -s "$1" | jq .; }
+
+echo "macros loaded"
+```
+````
+
+Run that cell once at the start of your session. Every cell below can now call `cy 'MATCH (n) RETURN n'` or `j http://localhost:8080/status`.
+
+Two reasons to keep macros in a visible first cell rather than hiding them in config:
+
+- **You can read them before you run them.** Opening a notebook doesn't execute anything until you click Run, so a definitions cell is auditable — you see exactly what will run (no surprise `rm -rf`). The trade-off of the self-contained `.md` is that macros travel with the file; keeping them in a cell you eyeball first keeps that safe.
+- **They travel with the notebook.** Send the `.md` to a colleague and the macros come with it. (Functions in your `~/.bashrc` / `~/.zshrc` are also available in cells — clinote spawns an interactive shell, so it sources them like a normal terminal — but those don't travel with the file.)
+
+#### Prefer functions over aliases
+
+Use **functions**, not aliases, for macros. Two reasons:
+
+1. Functions take arguments (`cy "$query"`); aliases don't, cleanly.
+2. Aliases have a subtle gotcha in clinote. Each cell body is wrapped in a `{ … }` group (so clinote can capture stderr for the whole cell), and bash expands aliases at *parse* time — before the group runs. So an alias **defined in a cell can't be used later in that same cell**:
+
+   ````markdown
+   ```sh
+   alias hi='echo HEY'
+   hi
+   ```
+   ````
+
+   …fails with `bash: hi: command not found`. The alias *is* defined once the cell finishes, so a **later** cell can use it — but that split behavior is confusing. Functions don't have this problem: they resolve at execution time and work whether you call them in the same cell or a later one.
+
+If you re-run the definitions cell after restarting clinote, the shell is fresh, so the macros need to be re-loaded — that's the one manual step. It's also the safety feature: nothing runs until you choose to run it.
 
 ### Editing prose
 
