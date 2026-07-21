@@ -321,30 +321,23 @@ func TestDeleteCellGatedByEditable(t *testing.T) {
 		t.Errorf("expected 403 without editable, got %d", rec.Code)
 	}
 
-	// With editable, delete succeeds and the file becomes empty.
+	// With editable, delete succeeds and the cell leaves the file.
 	srcE := "---\ntitle: T\neditable: true\n---\n\n```sh\necho hi\n```\n"
-	_, eE, path := makeServer(t, srcE)
-	req2 := httptest.NewRequest(http.MethodPost, "/block/2/delete", nil) // idx 2: cmd (idx 0 was a prose-like leading text? actually let me find it)
-	rec2 := httptest.NewRecorder()
-	// Find the cmd idx first.
+	srvE, eE, path := makeServer(t, srcE)
+
 	cmdIdx := -1
-	srvE, _, _ := makeServer(t, srcE)
-	_ = srvE // not used here; just need to find idx via reading the response
-	// Simpler: GET / and parse
-	reqIdx := httptest.NewRequest(http.MethodGet, "/", nil)
-	recIdx := httptest.NewRecorder()
-	eE.ServeHTTP(recIdx, reqIdx)
-	// We know from the source structure that the cmd is the only sh fence — find its idx by looking for "Run" / cell-N
-	for i := 0; i < 5; i++ {
-		if strings.Contains(recIdx.Body.String(), `id="cell-`+strconv.Itoa(i)+`"`) {
+	for i, b := range srvE.nb.Blocks {
+		if _, ok := b.(notebook.CommandBlock); ok {
 			cmdIdx = i
 			break
 		}
 	}
 	if cmdIdx < 0 {
-		t.Fatal("cmd idx not found")
+		t.Fatal("no command block found")
 	}
-	req2 = httptest.NewRequest(http.MethodPost, "/block/"+strconv.Itoa(cmdIdx)+"/delete", nil)
+
+	req2 := httptest.NewRequest(http.MethodPost, "/block/"+strconv.Itoa(cmdIdx)+"/delete", nil)
+	rec2 := httptest.NewRecorder()
 	eE.ServeHTTP(rec2, req2)
 	if rec2.Code != http.StatusOK {
 		t.Fatalf("delete status %d body=%s", rec2.Code, rec2.Body.String())

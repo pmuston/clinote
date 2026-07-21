@@ -23,6 +23,7 @@ A walk-through of clinote from first install to power-user patterns. For a one-p
   - [csv](#csv)
   - [tsv](#tsv)
   - [jsonl](#jsonl)
+- [Images and other files](#images-and-other-files)
 - [stdout vs stderr](#stdout-vs-stderr)
 - [Front-matter reference](#front-matter-reference)
 - [CLI reference](#cli-reference)
@@ -379,6 +380,38 @@ Rows that aren't valid JSON objects fall back to the text renderer.
 - **jsonl** for tools that emit JSON-per-line: `kubectl ... | jq -c '.items[]'`, `gh api ... --jq '.[]'`, structured log files.
 
 If you forget to set `out=` and the output looks tabular, click the format picker on the cell (requires `editable: true`). Both the cell's hint and the output's type update together.
+
+## Images and other files
+
+Files sitting next to the notebook are served by clinote, so an ordinary
+markdown image link works in the browser exactly as it does on GitHub:
+
+````markdown
+```sh
+mytool --format svg --out chart.svg
+```
+
+![chart](chart.svg)
+````
+
+Run the cell to produce `chart.svg`, and the image below it renders. Nothing
+about the file format changes — that's plain CommonMark, so GitHub shows the
+chart too. Relative subdirectories work as well (`![](img/chart.svg)`).
+
+This suits SVG particularly well: the notebook stays small and greppable, the
+`.md` diff stays readable when you regenerate a chart, and there's no 1 MiB
+output cap to worry about. It works for PNG or anything else your tools emit.
+
+The trade-off is that the notebook is no longer a single file — moving it means
+moving its images too.
+
+**Scope and safety.** Only the notebook's own directory is served. Paths that
+try to climb above it are refused, including percent-encoded attempts and
+symlinks pointing elsewhere; so are dotfiles, which keeps `.git/` and `.env`
+out of reach if a notebook happens to live in a repo root. Served files carry
+`Content-Security-Policy: sandbox`, so an SVG containing `<script>` stays inert
+even if you navigate straight to its URL — opening a notebook someone sent you
+never executes anything.
 
 ## stdout vs stderr
 

@@ -69,6 +69,12 @@ func (s *Server) Register(e *echo.Echo) {
 	e.POST("/cell/:idx/format", s.handleCellFormat)
 	e.GET("/picker", s.handlePicker)
 	e.GET("/static/*", echo.WrapHandler(http.StripPrefix("/static/", http.FileServer(http.FS(staticFS())))))
+
+	// Registered last, and deliberately at the root: markdown image links are
+	// relative ("![chart](chart.svg)"), so the browser asks for "/chart.svg".
+	// Echo prefers static and parameterised routes over this catch-all, so the
+	// endpoints above keep priority.
+	e.GET("/*", s.handleNotebookFile)
 }
 
 // renderTemplate executes the named template into w with data.

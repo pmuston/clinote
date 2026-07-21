@@ -134,6 +134,23 @@ If you forget the hint and the output looks tabular, you can hand-edit `type=tex
 - **Delete (×)** — every block shows a delete button. Sh cells and orphan output blocks need `editable: true` to delete; prose can always be deleted. A confirmation dialog (`window.confirm`) appears before the deletion. Deleting an sh cell also removes its paired output block.
 - **Interrupt** — visible top-right while a cell is running; sends SIGINT to the foreground process group.
 
+## Images
+
+Files next to the notebook are served, so a plain markdown image link renders in
+the browser the same way it does on GitHub:
+
+````markdown
+```sh
+mytool --format svg --out chart.svg
+```
+
+![chart](chart.svg)
+````
+
+Only the notebook's own directory is reachable — traversal above it (including
+percent-encoded and via symlinks) and dotfiles are refused, and served files are
+sandboxed via CSP so an SVG carrying `<script>` stays inert.
+
 ## Output: stdout vs stderr
 
 A command's stdout and stderr are captured separately. The saved output block contains:
