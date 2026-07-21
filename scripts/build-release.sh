@@ -301,6 +301,10 @@ class ${CLASS} < Formula
 
   def install
     bin.install "${BINARY}"
+    # Homebrew's install_metafiles picks up LICENSE and README automatically
+    # but not this, so it must be installed explicitly — otherwise the
+    # attribution notices ship in the tarball and are discarded on install.
+    doc.install "THIRD-PARTY-NOTICES.md"
   end
 
   test do
