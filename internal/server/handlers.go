@@ -33,7 +33,7 @@ func (s *Server) handleRun(c echo.Context) error {
 	}
 
 	s.mu.Lock()
-	if s.activeIdx >= 0 {
+	if s.activeIdx >= 0 || s.batch.active {
 		s.mu.Unlock()
 		return c.String(http.StatusConflict, "another run in flight")
 	}
@@ -68,24 +68,30 @@ func (s *Server) executeRun(idx int, command, outType string) {
 	res, err := s.runner.Run(context.Background(), command)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.applyResult(idx, res, err, outType)
+	s.activeIdx = -1
+}
 
-	if err != nil {
-		// On runner error, mark as failed by writing a placeholder output.
-		// Errors are always text — the declared out= type doesn't apply to
-		// an error message.
+// applyResult writes a completed run into the notebook and saves it, returning
+// true if the cell failed. Shared by single runs and batches so both record
+// outputs identically. The caller must hold s.mu and is responsible for
+// clearing activeIdx.
+func (s *Server) applyResult(idx int, res runner.Result, runErr error, outType string) (failed bool) {
+	if runErr != nil {
+		// On runner error, record a placeholder output. Errors are always text
+		// — the declared out= type doesn't apply to an error message.
 		attrs := map[string]string{
 			"type": "text",
 			"exit": "-1",
 			"ran":  nowFunc().UTC().Format(time.RFC3339),
 			"dur":  "0s",
 		}
-		body := "runner error: " + err.Error() + "\n"
+		body := "runner error: " + runErr.Error() + "\n"
 		_ = s.nb.SetOutput(idx, body, attrs)
 		_ = s.nb.WriteFile(s.path)
-		s.activeIdx = -1
 		s.runResults[idx] = &runner.Result{Output: []byte(body), ExitCode: -1, Started: nowFunc(), Duration: 0}
 		s.liveANSI[idx] = []byte(body)
-		return
+		return true
 	}
 
 	// Pick the stream based on exit code:
@@ -104,8 +110,7 @@ func (s *Server) executeRun(idx int, command, outType string) {
 	}
 	// The on-disk body is already ANSI-stripped (the runner stripped it).
 	if err := s.nb.SetOutput(idx, string(body), attrs); err != nil {
-		s.activeIdx = -1
-		return
+		return true
 	}
 	_ = s.nb.WriteFile(s.path)
 
@@ -113,7 +118,7 @@ func (s *Server) executeRun(idx int, command, outType string) {
 	// ANSI so we store the picked body for the one-shot live render.
 	s.liveANSI[idx] = body
 	s.runResults[idx] = &res
-	s.activeIdx = -1
+	return res.ExitCode != 0
 }
 
 // pickOutputStream selects which captured stream becomes the cell's saved
@@ -170,7 +175,65 @@ func (s *Server) respondCell(c echo.Context, idx int) error {
 	return s.renderFragment(c, "cell", u)
 }
 
+// handleRunAll starts a batch. With ?from=<block idx> it begins at that cell,
+// otherwise at the first. Returns the re-rendered notebook body, which carries
+// the poller that refreshes the page while the batch runs.
+func (s *Server) handleRunAll(c echo.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.activeIdx >= 0 || s.batch.active {
+		return c.String(http.StatusConflict, "another run in flight")
+	}
+
+	startOrd := 0
+	if from := c.QueryParam("from"); from != "" {
+		idx, err := strconv.Atoi(from)
+		if err != nil {
+			return c.String(http.StatusBadRequest, "bad from")
+		}
+		startOrd = ordinalOf(s.nb, idx)
+		if startOrd < 0 {
+			return c.String(http.StatusBadRequest, "from is not a command cell")
+		}
+	}
+	if len(commandIndices(s.nb)) == 0 {
+		return c.String(http.StatusBadRequest, "no command cells to run")
+	}
+
+	s.startBatch(startOrd)
+	return s.respondBody(c)
+}
+
+// handleNotebookBody returns the notebook body fragment. The page polls this
+// while a batch is running so completed cells appear as they finish; the
+// response stops carrying the poller once the batch ends, which halts polling
+// the same way the per-cell spinner does.
+func (s *Server) handleNotebookBody(c echo.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.respondBody(c)
+}
+
+// respondBody renders the notebook-body fragment. Caller must hold s.mu.
+func (s *Server) respondBody(c echo.Context) error {
+	data, err := s.buildBodyData()
+	if err != nil {
+		return err
+	}
+	return s.renderFragment(c, "notebook-body", data)
+}
+
 func (s *Server) handleInterrupt(c echo.Context) error {
+	// Abort the batch before signalling: a batch that continued to the next
+	// cell after you interrupted this one would run it against half-finished
+	// state, which is exactly what you were trying to prevent.
+	s.mu.Lock()
+	if s.batch.active {
+		s.batch.abort = true
+	}
+	s.mu.Unlock()
+
 	if err := s.runner.Interrupt(); err != nil {
 		return c.String(http.StatusInternalServerError, err.Error())
 	}
@@ -352,7 +415,7 @@ func (s *Server) handleAddCell(c echo.Context) error {
 		return c.String(http.StatusInternalServerError, err.Error())
 	}
 	newIdx := lastBlockIdxOfKind(s.nb, kind)
-	units, err := s.buildUnits(-1)
+	data, err := s.buildBodyData()
 	if err != nil {
 		s.mu.Unlock()
 		return err
@@ -361,13 +424,13 @@ func (s *Server) handleAddCell(c echo.Context) error {
 	// only takes effect when editable=true (the edit form requires it server-
 	// side); otherwise we leave it in view mode.
 	if newIdx >= 0 {
-		for i := range units {
-			if units[i].Idx == newIdx {
-				if units[i].Kind == "prose" || (units[i].Kind == "cell" && s.nb.FrontMatter.Editable) {
-					units[i].StartInEditMode = true
-					if units[i].Kind == "prose" {
+		for i := range data.Units {
+			if data.Units[i].Idx == newIdx {
+				if data.Units[i].Kind == "prose" || (data.Units[i].Kind == "cell" && s.nb.FrontMatter.Editable) {
+					data.Units[i].StartInEditMode = true
+					if data.Units[i].Kind == "prose" {
 						// Blank out the placeholder so the textarea opens empty.
-						units[i].Raw = ""
+						data.Units[i].Raw = ""
 					}
 				}
 				break
@@ -375,7 +438,7 @@ func (s *Server) handleAddCell(c echo.Context) error {
 		}
 	}
 	s.mu.Unlock()
-	return s.renderFragment(c, "notebook-body", units)
+	return s.renderFragment(c, "notebook-body", data)
 }
 
 // lastBlockIdxOfKind returns the highest block index matching kind ("sh" or
@@ -429,11 +492,7 @@ func (s *Server) handleBlockDelete(c echo.Context) error {
 	if err := s.nb.WriteFile(s.path); err != nil {
 		return c.String(http.StatusInternalServerError, err.Error())
 	}
-	units, err := s.buildUnits(-1)
-	if err != nil {
-		return err
-	}
-	return s.renderFragment(c, "notebook-body", units)
+	return s.respondBody(c)
 }
 
 // handleCellEdit returns the editor form for a command cell. Requires

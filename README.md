@@ -132,6 +132,7 @@ If you forget the hint and the output looks tabular, you can hand-edit `type=tex
 ## Working in the browser
 
 - **Run** — each command cell has a Run button. Output is spliced into the `.md` file when it completes.
+- **Run all** / **run ↓** — run every cell from the top, or from one cell downward. Both confirm first and stop at the first non-zero exit, since a notebook is usually a chain and continuing past a failed stage produces plausible-looking wrong results. Use `cmd || true` for a cell that should survive failure. Interrupt aborts the batch.
 - **Edit prose** — hover over a prose paragraph and click _edit_ to swap to a textarea. Save persists immediately.
 - **Edit sh cells** — only when the notebook has `editable: true` in its YAML front matter. Each cell gets an _edit_ button next to Run; click to swap to a textarea, type a new command, save. Without the flag, the edit button isn't shown and the endpoint returns 403 — the safe default for shared / demo notebooks.
 - **Change output format** — only with `editable: true`. A dropdown next to the edit button lets you pick text / csv / tsv / jsonl after the fact. Selecting a value rewrites BOTH the command's `out=` attribute AND the existing output block's `type=`, so the on-disk file stays internally consistent and the next run will save with the new type automatically. Useful when you ran a command, saw the output was tabular, and want to reformat without re-running.

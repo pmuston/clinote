@@ -37,6 +37,13 @@ type unit struct {
 	Command   string
 	HasOutput bool
 	Running   bool
+	// SelfPoll is true when this cell's spinner should poll /cell/:idx for its
+	// own completion. During a batch it is false: the whole body is being
+	// polled instead, and two pollers racing on the same cell would swap
+	// conflicting fragments into the page.
+	SelfPoll bool
+	// BatchActive disables per-cell controls while a batch owns the runner.
+	BatchActive bool
 	// OutHint mirrors the command's `out=` attribute (or "text" if absent).
 	// Drives the type picker so it reflects the command's declared intent
 	// even when there's no paired output yet.
@@ -51,11 +58,25 @@ type unit struct {
 	Failed     bool
 }
 
+// bodyData is what the notebook-body fragment renders from. It is shared by
+// the full page and by the poll endpoint, so a batch in progress looks the
+// same either way.
+type bodyData struct {
+	Units []unit
+	// BatchActive drives the self-terminating poller: while true the body
+	// carries a polling element, and the first response after the batch ends
+	// omits it, which stops the polling.
+	BatchActive bool
+	BatchStatus string
+	// CommandCount seeds the run-all confirmation prompt.
+	CommandCount int
+}
+
 type pageData struct {
 	Title string
 	Path  string
 	Wide  bool
-	Units []unit
+	Body  bodyData
 	// MissingEnv lists front-matter `requires:` variables absent from the
 	// environment. Reported as a banner, never enforced — you should be able
 	// to open a notebook to read it without its credentials to hand.
@@ -84,7 +105,7 @@ func missingEnv(required []string) []string {
 }
 
 func (s *Server) buildPageData() (pageData, error) {
-	units, err := s.buildUnits(-1)
+	body, err := s.buildBodyData()
 	if err != nil {
 		return pageData{}, err
 	}
@@ -92,8 +113,22 @@ func (s *Server) buildPageData() (pageData, error) {
 		Title:      s.title(),
 		Path:       s.path,
 		Wide:       s.nb.FrontMatter.Width == "full",
-		Units:      units,
+		Body:       body,
 		MissingEnv: missingEnv(s.nb.FrontMatter.Requires),
+	}, nil
+}
+
+// buildBodyData assembles the notebook body. Caller must hold s.mu.
+func (s *Server) buildBodyData() (bodyData, error) {
+	units, err := s.buildUnits(-1)
+	if err != nil {
+		return bodyData{}, err
+	}
+	return bodyData{
+		Units:        units,
+		BatchActive:  s.batch.active,
+		BatchStatus:  s.batchStatus(),
+		CommandCount: len(commandIndices(s.nb)),
 	}, nil
 }
 
@@ -152,12 +187,14 @@ func (s *Server) cellUnit(idx int, c notebook.CommandBlock, liveIdx int) (unit, 
 		hint = "text"
 	}
 	u := unit{
-		Kind:     "cell",
-		Idx:      idx,
-		Editable: s.nb.FrontMatter.Editable,
-		Command:  c.Body(s.nb.Source),
-		Running:  s.activeIdx == idx,
-		OutHint:  hint,
+		Kind:        "cell",
+		Idx:         idx,
+		Editable:    s.nb.FrontMatter.Editable,
+		Command:     c.Body(s.nb.Source),
+		Running:     s.activeIdx == idx,
+		SelfPoll:    !s.batch.active,
+		BatchActive: s.batch.active,
+		OutHint:     hint,
 	}
 	// Find paired output (immediately following, only whitespace between).
 	if pair, ok := pairedOutput(s.nb, idx); ok {

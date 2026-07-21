@@ -12,6 +12,11 @@
   <h1>{{.Title}}</h1>
   <span class="path">{{.Path}}</span>
   <span class="save-status" id="save-status">saved</span>
+  {{if .Body.CommandCount}}<button class="run-all-btn"
+          hx-post="/run-all"
+          hx-target="#notebook" hx-swap="innerHTML"
+          hx-confirm="Run all {{.Body.CommandCount}} cells? Stops at the first failure."
+          title="Run every cell from the top">Run all</button>{{end}}
   <button class="interrupt-btn" id="interrupt-btn"
           hx-post="/interrupt" hx-swap="none"
           style="display:none">Interrupt</button>
@@ -22,37 +27,46 @@
   <span class="hint">— the notebook's front matter requires these. Export them and restart clinote; cells using them will fail otherwise.</span>
 </div>{{end}}
 <main id="notebook"{{if .Wide}} class="wide"{{end}}>
-{{template "notebook-body" .Units}}
+{{template "notebook-body" .Body}}
 </main>
 <script>
-// Show the interrupt button while a run is in flight.
+// Show the interrupt button while anything is running — a single cell or a
+// batch. Interrupt aborts a batch as well as killing the current cell.
 document.body.addEventListener("htmx:beforeRequest", function(e) {
-  if (e.detail.requestConfig.path.startsWith("/run/")) {
+  var p = e.detail.requestConfig.path;
+  if (p.startsWith("/run/") || p.startsWith("/run-all")) {
     document.getElementById("interrupt-btn").style.display = "";
     document.getElementById("save-status").textContent = "running…";
   }
 });
 document.body.addEventListener("htmx:afterSwap", function(e) {
-  // If no spinners remain, hide the interrupt button and mark saved.
-  if (!document.querySelector(".spinner")) {
-    document.getElementById("interrupt-btn").style.display = "none";
-    document.getElementById("save-status").textContent = "saved";
-  }
+  // A spinner or the batch bar means work is still in flight. The batch bar
+  // check matters because during a batch the spinner is static (the body is
+  // polled instead), so spinners alone would not tell the whole story.
+  var busy = document.querySelector(".spinner") || document.querySelector(".batch-bar");
+  document.getElementById("interrupt-btn").style.display = busy ? "" : "none";
+  document.getElementById("save-status").textContent = busy ? "running…" : "saved";
 });
 </script>
 </body>
 </html>{{end}}
 
-{{define "notebook-body"}}{{range .}}{{if eq .Kind "prose"}}{{if .StartInEditMode}}{{template "prose-edit" .}}{{else}}{{template "prose" .}}{{end}}{{else if eq .Kind "cell"}}{{if .StartInEditMode}}{{template "cell-edit" .}}{{else}}{{template "cell" .}}{{end}}{{else if eq .Kind "orphan"}}{{template "orphan" .}}{{end}}{{end}}
+{{define "notebook-body"}}{{if .BatchActive}}<div class="batch-bar"
+     hx-get="/notebook"
+     hx-trigger="every 600ms"
+     hx-target="#notebook" hx-swap="innerHTML">{{.BatchStatus}}</div>{{end}}
+{{range .Units}}{{if eq .Kind "prose"}}{{if .StartInEditMode}}{{template "prose-edit" .}}{{else}}{{template "prose" .}}{{end}}{{else if eq .Kind "cell"}}{{if .StartInEditMode}}{{template "cell-edit" .}}{{else}}{{template "cell" .}}{{end}}{{else if eq .Kind "orphan"}}{{template "orphan" .}}{{end}}{{end}}
 <div class="add-cell-row">
   <button class="add-cell-btn"
           hx-post="/add-cell?kind=sh"
           hx-target="#notebook"
-          hx-swap="innerHTML">+ sh cell</button>
+          hx-swap="innerHTML"
+          {{if .BatchActive}}disabled{{end}}>+ sh cell</button>
   <button class="add-cell-btn"
           hx-post="/add-cell?kind=prose"
           hx-target="#notebook"
-          hx-swap="innerHTML">+ prose</button>
+          hx-swap="innerHTML"
+          {{if .BatchActive}}disabled{{end}}>+ prose</button>
 </div>{{end}}
 
 {{define "prose"}}<div class="prose" id="prose-{{.Idx}}" data-idx="{{.Idx}}">
@@ -85,16 +99,22 @@ document.body.addEventListener("htmx:afterSwap", function(e) {
     <button class="run-btn"
             hx-post="/run/{{.Idx}}"
             hx-target="#cell-{{.Idx}}" hx-swap="outerHTML"
-            {{if .Running}}disabled{{end}}>Run</button>
+            {{if or .Running .BatchActive}}disabled{{end}}>Run</button>
+    <button class="run-from-btn"
+            hx-post="/run-all?from={{.Idx}}"
+            hx-target="#notebook" hx-swap="innerHTML"
+            hx-confirm="Run this cell and everything below it? Stops at the first failure."
+            title="Run this cell and all cells below"
+            {{if or .Running .BatchActive}}disabled{{end}}>run ↓</button>
     {{if .Editable}}<button class="cell-edit-btn"
             hx-get="/cell/{{.Idx}}/edit"
             hx-target="#cell-{{.Idx}}" hx-swap="outerHTML"
-            {{if .Running}}disabled{{end}}>edit</button>
+            {{if or .Running .BatchActive}}disabled{{end}}>edit</button>
     <select class="format-picker" name="type"
             hx-post="/cell/{{.Idx}}/format"
             hx-target="#cell-{{.Idx}}" hx-swap="outerHTML"
             hx-trigger="change"
-            {{if .Running}}disabled{{end}}>
+            {{if or .Running .BatchActive}}disabled{{end}}>
       <option value="text"{{if eq .OutHint "text"}} selected{{end}}>text</option>
       <option value="csv"{{if eq .OutHint "csv"}} selected{{end}}>csv</option>
       <option value="tsv"{{if eq .OutHint "tsv"}} selected{{end}}>tsv</option>
@@ -105,7 +125,7 @@ document.body.addEventListener("htmx:afterSwap", function(e) {
             hx-confirm="Delete this cell?"
             hx-post="/block/{{.Idx}}/delete"
             hx-target="#notebook" hx-swap="innerHTML"
-            {{if .Running}}disabled{{end}}>×</button>
+            {{if or .Running .BatchActive}}disabled{{end}}>×</button>
     {{else if .HasOutput}}<span class="muted">{{.OutputType}}</span>{{end}}
   </div>
   {{if .Running}}{{template "spinner" .}}
@@ -125,10 +145,10 @@ document.body.addEventListener("htmx:afterSwap", function(e) {
   </form>
 </div>{{end}}
 
-{{define "spinner"}}<div class="spinner"
+{{define "spinner"}}{{if .SelfPoll}}<div class="spinner"
        hx-get="/cell/{{.Idx}}"
        hx-trigger="every 500ms"
-       hx-target="#cell-{{.Idx}}" hx-swap="outerHTML">running…</div>{{end}}
+       hx-target="#cell-{{.Idx}}" hx-swap="outerHTML">running…</div>{{else}}<div class="spinner">running…</div>{{end}}{{end}}
 
 {{define "output"}}{{if eq .OutputType "text"}}<pre class="output output-text">{{.OutputHTML}}</pre>{{else}}<div class="output output-{{.OutputType}}">{{.OutputHTML}}</div>{{end}}
 <div class="output-footer{{if .Failed}} failed{{end}}">exit={{.ExitCode}} · dur={{.Duration}}{{if .Truncated}} · truncated{{end}}</div>{{end}}

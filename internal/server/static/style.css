@@ -48,6 +48,48 @@ header .save-status {
   font-size: 13px;
 }
 
+header .run-all-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+header .run-all-btn:hover { filter: brightness(1.1); }
+
+.batch-bar {
+  position: sticky;
+  top: 44px;
+  z-index: 5;
+  margin: 0 0 16px;
+  padding: 8px 14px;
+  border: 1px solid var(--accent);
+  border-left: 4px solid var(--accent);
+  border-radius: 4px;
+  background: #eef4ff;
+  color: #14418c;
+  font-size: 13px;
+}
+
+.batch-bar::before { content: "⏳ "; }
+
+.cell .run-from-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: ui-monospace, Menlo, monospace;
+  cursor: pointer;
+}
+
+.cell .run-from-btn:hover { border-color: var(--accent); color: var(--accent); }
+.cell .run-from-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 header .interrupt-btn {
   background: var(--error);
   color: #fff;

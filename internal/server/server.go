@@ -33,6 +33,8 @@ type Server struct {
 	// runResults caches the most recent run result per cell so /cell/:idx can
 	// render the freshly-completed output via the live-render path.
 	runResults map[int]*runner.Result
+	// batch tracks a run-all / run-from-here in progress. Guarded by mu.
+	batch batchState
 
 	tmpl *template.Template
 }
@@ -62,6 +64,8 @@ func (s *Server) Register(e *echo.Echo) {
 	e.GET("/prose/:idx", s.handleProseView)
 	e.GET("/prose/:idx/edit", s.handleProseEdit)
 	e.POST("/prose/:idx", s.handleProseSave)
+	e.POST("/run-all", s.handleRunAll)
+	e.GET("/notebook", s.handleNotebookBody)
 	e.POST("/add-cell", s.handleAddCell)
 	e.POST("/block/:idx/delete", s.handleBlockDelete)
 	e.GET("/cell/:idx/edit", s.handleCellEdit)

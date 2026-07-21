@@ -10,6 +10,7 @@ A walk-through of clinote from first install to power-user patterns. For a one-p
 - [Anatomy of a notebook file](#anatomy-of-a-notebook-file)
 - [Working in the browser](#working-in-the-browser)
   - [Running cells](#running-cells)
+  - [Running a whole pipeline](#running-a-whole-pipeline)
   - [The persistent shell](#the-persistent-shell)
   - [Defining macros and reusable functions](#defining-macros-and-reusable-functions)
   - [Editing prose](#editing-prose)
@@ -176,6 +177,38 @@ Anything else in the file (headings, links, lists, code blocks in other language
 Each command cell has a **Run** button. Click it, see the spinner, get the output. Behind the scenes clinote POSTs `/run/:idx`, starts the command in a goroutine, and the browser polls `/cell/:idx` every 500ms via HTMX until the output is ready.
 
 While a run is in flight, an **Interrupt** button appears at the top right. The save-status indicator changes from "saved" to "running…". Only one Run is in flight at a time — kicking off a second Run while one is running returns 409.
+
+### Running a whole pipeline
+
+**Run all**, in the header, runs every cell from the top. **run ↓** on any cell
+runs that cell and everything below it. Both ask for confirmation first, naming
+how many cells will run.
+
+Both **stop at the first cell that exits non-zero**. This isn't configurable,
+and the reason is that notebooks are usually chains: carrying on past a failed
+stage runs later cells against stale or missing inputs, which tends to produce
+output that looks plausible and is wrong — worse than an error. If a particular
+cell should survive failure, say so in the shell:
+
+```sh
+optional-step || true
+```
+
+**Interrupt** aborts the batch as well as killing the current cell. Continuing
+to the next stage after you deliberately interrupted one would defeat the point.
+
+While a batch runs, a progress bar shows which cell is going, and the per-cell
+Run, edit, delete and format controls are disabled — the batch owns the shell,
+and a single run attempted alongside it is refused.
+
+**run ↓ is usually the one you want** while iterating. In a pipeline whose first
+stage is an expensive query, re-running from stage two lets you tune later
+stages against the cached intermediate without hitting the database again.
+
+There's no staleness detection — clinote has no idea which cells consume which
+files, and guessing from timestamps would be wrong in exactly the cases that
+matter. If you want dependency-driven rebuilds, that's what `make` is for, and
+a cell can run it.
 
 ### The persistent shell
 
