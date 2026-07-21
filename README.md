@@ -63,8 +63,13 @@ Recognised fields:
 - `shell` — `bash` or `zsh` (default `bash`)
 - `editable` — `true` unlocks in-browser editing of sh command bodies (default `false`)
 - `width` — `full` to use the full window width for the notebook column (default is a narrow column suitable for prose reading)
+- `requires` — list of environment variable names the notebook needs; a banner names any that are unset. Reports only, never blocks, and cannot execute anything
 
 Unknown fields are preserved on save.
+
+Never `export` a credential in a cell — cell bodies are written to the `.md`
+verbatim. Export it in your shell before launching clinote; the runner inherits
+that environment. See the [user guide](docs/user-guide.md#secrets-and-required-environment).
 
 ### Command cells
 

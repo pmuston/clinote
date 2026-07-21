@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"html/template"
+	"os"
+	"strings"
 
 	"github.com/pmuston/clinote/internal/notebook"
 	"github.com/pmuston/clinote/internal/render"
@@ -54,6 +56,31 @@ type pageData struct {
 	Path  string
 	Wide  bool
 	Units []unit
+	// MissingEnv lists front-matter `requires:` variables absent from the
+	// environment. Reported as a banner, never enforced — you should be able
+	// to open a notebook to read it without its credentials to hand.
+	MissingEnv []string
+}
+
+// missingEnv returns the required variables that are unset or empty.
+//
+// The check reads the server's own environment, which is what the runner
+// passes to the shell (cmd.Env derives from os.Environ). The shell also sources
+// the user's rc file, so a variable exported only in ~/.bashrc is visible to
+// cells while reported missing here — the common case, exporting before launch,
+// is accurate.
+func missingEnv(required []string) []string {
+	var missing []string
+	for _, name := range required {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if os.Getenv(name) == "" {
+			missing = append(missing, name)
+		}
+	}
+	return missing
 }
 
 func (s *Server) buildPageData() (pageData, error) {
@@ -62,10 +89,11 @@ func (s *Server) buildPageData() (pageData, error) {
 		return pageData{}, err
 	}
 	return pageData{
-		Title: s.title(),
-		Path:  s.path,
-		Wide:  s.nb.FrontMatter.Width == "full",
-		Units: units,
+		Title:      s.title(),
+		Path:       s.path,
+		Wide:       s.nb.FrontMatter.Width == "full",
+		Units:      units,
+		MissingEnv: missingEnv(s.nb.FrontMatter.Requires),
 	}, nil
 }
 

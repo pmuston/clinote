@@ -57,6 +57,27 @@ header .interrupt-btn {
   cursor: pointer;
 }
 
+.env-warning {
+  max-width: 920px;
+  margin: 16px auto 0;
+  padding: 10px 14px;
+  border: 1px solid #e0c000;
+  border-left: 4px solid #e0c000;
+  border-radius: 4px;
+  background: #fffbe6;
+  font-size: 13px;
+  color: #5a4a00;
+}
+
+.env-warning code {
+  font-family: ui-monospace, Menlo, monospace;
+  background: #fff3c4;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+.env-warning .hint { color: #7a6a20; }
+
 main {
   max-width: 920px;
   margin: 0 auto;

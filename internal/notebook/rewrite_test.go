@@ -433,6 +433,46 @@ func TestFrontMatterWidth(t *testing.T) {
 	}
 }
 
+func TestFrontMatterRequires(t *testing.T) {
+	src := "---\ntitle: T\nrequires:\n  - NEO4J_PW\n  - API_TOKEN\n---\n\nbody\n"
+	nb, err := Parse(bytes.NewReader([]byte(src)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"NEO4J_PW", "API_TOKEN"}
+	if len(nb.FrontMatter.Requires) != len(want) {
+		t.Fatalf("Requires = %v, want %v", nb.FrontMatter.Requires, want)
+	}
+	for i, w := range want {
+		if nb.FrontMatter.Requires[i] != w {
+			t.Errorf("Requires[%d] = %q, want %q", i, nb.FrontMatter.Requires[i], w)
+		}
+	}
+	// The field must not disturb byte-identical round-trip.
+	if !bytes.Equal(nb.Serialize(), []byte(src)) {
+		t.Errorf("round-trip lost the requires field:\n%s", nb.Serialize())
+	}
+
+	// Inline list form is equally valid YAML.
+	inline := "---\nrequires: [A, B]\n---\n\nbody\n"
+	nb2, err := Parse(bytes.NewReader([]byte(inline)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nb2.FrontMatter.Requires) != 2 {
+		t.Errorf("inline form: Requires = %v", nb2.FrontMatter.Requires)
+	}
+
+	// Absent → nil, not an error.
+	nb3, err := Parse(bytes.NewReader([]byte("---\ntitle: T\n---\n\nbody\n")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nb3.FrontMatter.Requires) != 0 {
+		t.Errorf("expected no requires, got %v", nb3.FrontMatter.Requires)
+	}
+}
+
 func TestFrontMatterEditable(t *testing.T) {
 	src := "---\ntitle: T\neditable: true\n---\n\nbody\n"
 	nb, err := Parse(bytes.NewReader([]byte(src)))

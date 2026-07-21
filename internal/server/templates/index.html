@@ -16,6 +16,11 @@
           hx-post="/interrupt" hx-swap="none"
           style="display:none">Interrupt</button>
 </header>
+{{if .MissingEnv}}<div class="env-warning" role="status">
+  <strong>Missing environment:</strong>
+  {{range .MissingEnv}}<code>{{.}}</code> {{end}}
+  <span class="hint">— the notebook's front matter requires these. Export them and restart clinote; cells using them will fail otherwise.</span>
+</div>{{end}}
 <main id="notebook"{{if .Wide}} class="wide"{{end}}>
 {{template "notebook-body" .Units}}
 </main>

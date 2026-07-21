@@ -46,6 +46,7 @@ func parseFrontMatter(src []byte, fm *FrontMatter) (int, error) {
 					Shell    string    `yaml:"shell"`
 					Editable bool      `yaml:"editable"`
 					Width    string    `yaml:"width"`
+					Requires []string  `yaml:"requires"`
 				}
 				if err := yaml.Unmarshal(raw, &data); err != nil {
 					return 0, fmt.Errorf("front matter yaml: %w", err)
@@ -55,6 +56,7 @@ func parseFrontMatter(src []byte, fm *FrontMatter) (int, error) {
 				fm.Shell = data.Shell
 				fm.Editable = data.Editable
 				fm.Width = data.Width
+				fm.Requires = data.Requires
 			}
 			return pos + len(open), nil
 		}

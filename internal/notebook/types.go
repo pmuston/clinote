@@ -27,6 +27,12 @@ type FrontMatter struct {
 	// narrow column suitable for prose reading.
 	Width string
 
+	// Requires names environment variables the notebook needs (credentials,
+	// endpoints). It is checked and reported, never acted on: the field can
+	// only name variables, so unlike an init hook it cannot execute anything
+	// when a notebook is opened.
+	Requires []string
+
 	Raw     []byte
 	Present bool
 }

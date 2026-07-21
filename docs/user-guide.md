@@ -23,6 +23,7 @@ A walk-through of clinote from first install to power-user patterns. For a one-p
   - [csv](#csv)
   - [tsv](#tsv)
   - [jsonl](#jsonl)
+- [Secrets and required environment](#secrets-and-required-environment)
 - [Images and other files](#images-and-other-files)
 - [stdout vs stderr](#stdout-vs-stderr)
 - [Front-matter reference](#front-matter-reference)
@@ -381,6 +382,81 @@ Rows that aren't valid JSON objects fall back to the text renderer.
 
 If you forget to set `out=` and the output looks tabular, click the format picker on the cell (requires `editable: true`). Both the cell's hint and the output's type update together.
 
+## Secrets and required environment
+
+Notebooks that hit a database or API need credentials, and the one thing you
+must not do is set them in a cell:
+
+```sh
+export NEO4J_PW=hunter2      # DON'T — this text is written into the .md file
+```
+
+Cell bodies are saved to disk verbatim, so that password is now in a file you
+might commit or send to a colleague. Instead export it in your shell **before**
+launching clinote:
+
+```sh
+export NEO4J_PW=…
+clinote notebooks/jacket-loop.md
+```
+
+The runner inherits the environment clinote was started with, so every cell can
+use `"$NEO4J_PW"` while the value never touches the notebook.
+
+There is no `secret` cell tag — redaction is not implemented, so nothing will
+scrub a credential that reaches an output block. Be wary of tools that echo
+their own arguments on failure; where a tool can read a password from the
+environment directly, prefer that to passing it on the command line.
+
+### Declaring what a notebook needs
+
+List required variables in the front matter:
+
+```yaml
+---
+title: Jacket loop — R101_JKT
+requires:
+  - NEO4J_PW
+---
+```
+
+If any are unset or empty, clinote shows a banner naming them. It is a report,
+not a gate: cells still run, so you can open a notebook to read it without
+having its credentials to hand.
+
+This is deliberately a list of names and nothing more. It cannot run anything
+when a notebook is opened — the property that matters if someone sends you one.
+
+It doubles as documentation: a colleague opening the notebook learns what it
+needs without hunting for the first cell that references a variable.
+
+The check reads clinote's own environment. A variable exported only in your
+`~/.bashrc` is visible to cells (the shell sources it) but still reported
+missing here — exporting before launch, the usual case, reports accurately.
+
+### Failing loudly in the notebook
+
+The banner warns before you start; a guard cell stops the run if you started
+anyway. Put this first:
+
+```sh
+: "${NEO4J_PW:?export it before launching clinote}"
+echo "NEO4J_PW set (${#NEO4J_PW} chars)"
+```
+
+Unset, the cell exits non-zero and shows
+`bash: NEO4J_PW: export it before launching clinote`. Set, you get
+`NEO4J_PW set (17 chars)`.
+
+The length matters more than it looks: it distinguishes a properly-set variable
+from an empty one or a leftover placeholder, which otherwise surface as a
+confusing authentication failure several cells later. `${#VAR}` reveals the
+length only, never the value.
+
+This form is safe in clinote specifically because the shell is interactive —
+`${VAR:?}` would terminate a non-interactive script, but here it just fails the
+cell and leaves your session intact.
+
 ## Images and other files
 
 Files sitting next to the notebook are served by clinote, so an ordinary
@@ -453,6 +529,8 @@ created: 2026-05-26T14:30:00Z       # RFC 3339 timestamp
 shell: bash                         # bash | zsh; default bash
 editable: true                      # unlock sh-cell editing + delete + format picker
 width: full                         # use full window width; default narrow column
+requires:                           # env vars the notebook needs; warns if unset
+  - NEO4J_PW
 ---
 ```
 
