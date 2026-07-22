@@ -24,6 +24,9 @@ import (
 	"github.com/pmuston/clinote/internal/version"
 )
 
+// DocsURL is the canonical online documentation, surfaced in the usage text.
+const DocsURL = "https://pmuston.github.io/clinote"
+
 // versionLine is what `clinote version` prints. The leading binary name is not
 // decoration: the Homebrew formula's test block asserts on "clinote v", and a
 // running instance identifying itself by name is what makes a stale deployment
@@ -73,6 +76,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr)
 	fmt.Fprintln(os.Stderr, "Flags:")
 	flag.PrintDefaults()
+	fmt.Fprintf(os.Stderr, "\ndocs: %s  (also: man clinote)\n", DocsURL)
 }
 
 func run(path string, noBrowser bool) error {

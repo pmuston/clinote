@@ -222,6 +222,18 @@ for f in README.md LICENSE; do
 done
 EXTRAS+=("$NOTICES")
 
+# Man page: if docs/<binary>.1.md exists, render it to troff with go-md2man
+# (pure Go, run via `go run …@latest` so it never touches this project's go.mod)
+# and bundle <binary>.1 into every tarball for the formula to install.
+MANPAGE=""
+if [[ -f "docs/${BINARY}.1.md" ]]; then
+  MANPAGE="$DIST/${BINARY}.1"
+  echo "Rendering man page from docs/${BINARY}.1.md"
+  go run github.com/cpuguy83/go-md2man/v2@latest -in "docs/${BINARY}.1.md" -out "$MANPAGE"
+  EXTRAS+=("$MANPAGE")
+  echo
+fi
+
 declare -A SHA
 
 for platform in "${PLATFORMS[@]}"; do
@@ -259,6 +271,13 @@ url_for() { echo "https://github.com/${OWNER}/${RELEASE_REPO}/releases/download/
 
 # Formula class name is the CamelCase of the binary: my-tool -> MyTool.
 CLASS="$(echo "$BINARY" | awk -F- '{for(i=1;i<=NF;i++) printf toupper(substr($i,1,1)) substr($i,2)}')"
+
+# Install the man page too when one was rendered. Empty otherwise, so the
+# formula is unchanged for a tool with no man page.
+MAN_INSTALL=""
+if [[ -n "$MANPAGE" ]]; then
+  MAN_INSTALL=$'\n    man1.install "'"${BINARY}"$'.1"'
+fi
 
 need_all=(darwin-amd64 darwin-arm64 linux-amd64 linux-arm64)
 have_all=true
@@ -300,7 +319,7 @@ class ${CLASS} < Formula
   end
 
   def install
-    bin.install "${BINARY}"
+    bin.install "${BINARY}"${MAN_INSTALL}
     # Homebrew's install_metafiles picks up LICENSE and README automatically
     # but not this, so it must be installed explicitly — otherwise the
     # attribution notices ship in the tarball and are discarded on install.
