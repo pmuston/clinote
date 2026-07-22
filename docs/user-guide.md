@@ -27,6 +27,7 @@ A walk-through of clinote from first install to power-user patterns. For a one-p
 - [Secrets and required environment](#secrets-and-required-environment)
 - [Images and other files](#images-and-other-files)
 - [stdout vs stderr](#stdout-vs-stderr)
+- [Worked example: a graph-to-diagram pipeline](#worked-example-a-graph-to-diagram-pipeline)
 - [Front-matter reference](#front-matter-reference)
 - [CLI reference](#cli-reference)
 - [Limitations and gotchas](#limitations-and-gotchas)
@@ -552,6 +553,126 @@ my-tool 2>&1
 This merges stderr into stdout at the shell level, so clinote sees one stream and saves it normally.
 
 This is a deliberate departure from the v1 spec (which merged the streams). The format picker doesn't change which stream was saved — that's decided at run time by the exit code.
+
+## Worked example: a graph-to-diagram pipeline
+
+This pulls the pieces above into one notebook. The task: run a Cypher query
+against Neo4j, map the result into a figure description, and render it to SVG —
+a four-stage chain where each stage's output feeds the next.
+
+Start it in your shell (so the credential never touches the file), then open it:
+
+```sh
+export NEO4J_PW=…
+clinote notebooks/jacket-loop.md
+```
+
+The notebook:
+
+````markdown
+---
+title: Jacket loop — R101_JKT
+shell: bash
+editable: true
+width: full
+requires:
+  - NEO4J_PW
+---
+
+# Jacket loop — R101_JKT
+
+Renders the equipment module `R101_JKT` and its attributes as an S88 figure.
+
+## Setup
+
+```sh
+: "${NEO4J_PW:?export it before launching clinote}"
+STEM=jacket-loop
+mkdir -p queries
+echo "ready — NEO4J_PW set (${#NEO4J_PW} chars)"
+```
+
+## The query
+
+Editing this cell regenerates the `.cypher` file, so the notebook is the source
+of truth for the query — not a file you have to remember to keep in sync.
+
+```sh
+cat > "queries/$STEM.cypher" <<'EOF'
+MATCH p = (em:EquipmentModule {name: 'R101_JKT'})
+          -[:CONTAINS]->(cm)-[:HAS_ATTRIBUTE]->(a)
+RETURN p ORDER BY a.name
+EOF
+echo "wrote queries/$STEM.cypher"
+```
+
+## Rows
+
+The query result is the thing you most want to eyeball when a figure looks
+wrong. `tee` lands it on disk as `$STEM.jsonl`; `out=jsonl` renders it as a
+sortable table right here.
+
+```sh out=jsonl
+cyq --password "$NEO4J_PW" --format jsonl -f "queries/$STEM.cypher" \
+  | tee "$STEM.jsonl"
+```
+
+## Map
+
+Reads the cached `.jsonl` rather than re-querying, so tuning `s88.gfigmap`
+re-runs this stage alone — with **run ↓** — without touching the database.
+
+```sh
+gfig map -m s88.gfigmap --source "cyq -f queries/$STEM.cypher" \
+  < "$STEM.jsonl" > "$STEM.gfig"
+echo "wrote $STEM.gfig"
+```
+
+## Validate
+
+A gate of its own: on success you see the confirmation, on failure the run
+stops here and shows `gfig check`'s stderr instead of marching on to render a
+broken figure.
+
+```sh
+gfig check "$STEM.gfig" && echo "check: clean"
+```
+
+## Render
+
+```sh
+gfig render "$STEM.gfig" > "$STEM.svg"
+echo "rendered $STEM.svg"
+```
+
+![jacket loop](jacket-loop.svg)
+````
+
+### How it runs
+
+- **First time:** click **Run all**. It stops at the first non-zero exit, so a
+  bad query or a failed `gfig check` halts the chain instead of producing a
+  wrong diagram.
+- **Iterating on the map:** edit `s88.gfigmap`, then **run ↓** on the *Map*
+  cell. Stages below re-run against the cached `.jsonl`; Neo4j is untouched.
+- **New module:** change `R101_JKT` in the query cell (and the `title`), Run
+  all. The notebook is a template — the query lives in it, not beside it.
+
+### Why it's shaped this way
+
+- The **guard cell** plus `requires:` catch a missing `NEO4J_PW` two ways: the
+  banner before you start, the cell if you started regardless. `${#NEO4J_PW}`
+  confirms it's set without printing it.
+- **Splitting the pipe** (`cyq … | tee $STEM.jsonl`, then a separate cell that
+  reads the file) turns the expensive query into a cache. It's also the only
+  way to *see* the intermediate — piped straight into `gfig map` it would exist
+  nowhere.
+- The `.svg`, `.gfig` and `.jsonl` are **build artifacts on disk**, not baked
+  into the `.md`. The notebook stays small and its diffs stay readable when you
+  regenerate; the figure still shows because files next to the notebook are
+  served. The trade-off is that moving the notebook means moving its artifacts.
+- No credential is ever written to the file, because it comes from the
+  environment, not a cell.
 
 ## Front-matter reference
 
