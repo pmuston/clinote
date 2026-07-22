@@ -218,9 +218,20 @@ func serve(path string, noBrowser bool) error {
 		}()
 	}
 
-	sigCh := make(chan os.Signal, 1)
+	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
+
+	// A second Ctrl-C forces exit. The graceful path below should always
+	// complete now that runner.Close no longer blocks on a hung command, but a
+	// stuck shutdown must never leave the terminal wedged — the whole point of
+	// the signal is to regain control.
+	go func() {
+		<-sigCh
+		fmt.Fprintln(os.Stderr, "clinote: forced exit")
+		os.Exit(1)
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	return e.Shutdown(ctx)

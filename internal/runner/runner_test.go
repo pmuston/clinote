@@ -17,6 +17,29 @@ func newRunner(t *testing.T) *Runner {
 	return r
 }
 
+// A command that never returns (here `cat` with no args, blocked reading stdin
+// that clinote never feeds it) must not make Close hang. Close runs on the
+// server's Ctrl-C path, so a deadlock here is what makes a hung notebook
+// un-Ctrl-C-able. Regression for that bug.
+func TestCloseWhileCommandHung(t *testing.T) {
+	r, err := New("bash")
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	go func() { _, _ = r.Run(context.Background(), "cat") }()
+	time.Sleep(400 * time.Millisecond) // let cat start and block on stdin
+
+	done := make(chan error, 1)
+	go func() { done <- r.Close() }()
+	select {
+	case <-done:
+		// Close returned despite the hung command — good.
+	case <-time.After(5 * time.Second):
+		t.Fatal("Close deadlocked while a command was hung")
+	}
+}
+
 func TestEchoAndExitZero(t *testing.T) {
 	r := newRunner(t)
 	res, err := r.Run(context.Background(), "echo hello-world")

@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -32,7 +33,11 @@ type Runner struct {
 	cmd      *exec.Cmd
 	pty      *os.File
 	sentinel string
-	closed   bool
+	// closed is atomic, not guarded by mu, on purpose: Close must be able to
+	// tear the runner down while a Run holds mu on a hung command. If closing
+	// depended on mu, a command blocked on input (which clinote never feeds a
+	// running command) would make Close — and so the whole process — un-Ctrl-C-able.
+	closed atomic.Bool
 }
 
 type Result struct {
@@ -113,7 +118,7 @@ func makeSentinel() string {
 func (r *Runner) Run(ctx context.Context, command string) (Result, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.closed {
+	if r.closed.Load() {
 		return Result{}, errors.New("runner closed")
 	}
 
@@ -297,16 +302,20 @@ func (r *Runner) Interrupt() error {
 	return syscall.Kill(-pgrp, syscall.SIGINT)
 }
 
-// Close terminates the shell and releases the pty. The pty is closed first so
-// the shell sees EOF on stdin and exits on its own; if it lingers, it gets
-// killed. Wait is bounded to avoid hanging on weird process states.
+// Close terminates the shell and releases the pty.
+//
+// It deliberately does NOT take r.mu. A hung command (e.g. one blocked reading
+// input clinote never sends) leaves a Run holding r.mu indefinitely, so a Close
+// that waited for the mutex would deadlock — and, since Close runs on the
+// server's Ctrl-C shutdown path, wedge the whole process. Instead Close closes
+// the pty directly: that makes the blocked pty.Read in a stuck readUntilSentinel
+// return an error, so the hung Run unwinds and releases r.mu on its own.
 func (r *Runner) Close() error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	if r.closed {
-		return nil
+	if r.closed.Swap(true) {
+		return nil // already closed
 	}
-	r.closed = true
+	// Closing the pty is what unblocks an in-flight Run; killing the shell
+	// stops anything still executing under it.
 	_ = r.pty.Close()
 	if r.cmd.Process != nil {
 		_ = r.cmd.Process.Kill()
