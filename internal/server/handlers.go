@@ -122,11 +122,24 @@ func (s *Server) applyResult(idx int, res runner.Result, runErr error, outType s
 }
 
 // pickOutputStream selects which captured stream becomes the cell's saved
-// output. Success → stdout; failure → stderr (with stdout fallback when
-// stderr is empty, e.g. `false` returns exit=1 with no output on either).
+// output. Each branch prefers the stream that stream normally carries the
+// useful content, and falls back to the other when the preferred one is empty —
+// so a cell never renders blank while the other stream has something to show.
+//
+//   - Success (exit 0): stdout, since stderr on success is usually progress or
+//     warnings. But plenty of commands write their real output to stderr and
+//     still exit 0 — `tool --version`, `--help`, and many informational
+//     commands — so when stdout is empty, fall back to stderr rather than
+//     saving a blank. (When stdout has content, stderr is still discarded, so
+//     genuine noise stays hidden.)
+//   - Failure (exit ≠ 0): stderr (the error message), falling back to stdout
+//     when stderr is empty, e.g. `false` produces neither.
 func pickOutputStream(res runner.Result) []byte {
 	if res.ExitCode == 0 {
-		return res.Stdout
+		if len(res.Stdout) > 0 {
+			return res.Stdout
+		}
+		return res.Stderr
 	}
 	if len(res.Stderr) > 0 {
 		return res.Stderr

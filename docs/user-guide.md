@@ -530,18 +530,26 @@ clinote captures stdout and stderr **separately**:
 - The shell-level redirect `{ command\n} 2> /tmp/clinote-stderr-...` sends stderr to a per-run temp file.
 - Stdout still flows through the pty as the captured output.
 
-When the command finishes, the server picks one stream to save:
+When the command finishes, the server picks one stream to save. Each branch
+prefers the stream that normally carries the useful content, and falls back to
+the other when the preferred one is empty — so a cell never renders blank while
+the other stream has something to show:
 
-- **exit = 0** → stdout (stderr is treated as noise: progress bars, warnings, `time(1)` output, etc.).
-- **exit ≠ 0** → stderr (the error message — what you almost always want to see when something broke).
-- **exit ≠ 0 with empty stderr** → fallback to stdout (e.g., `false` produces nothing on either stream).
+- **exit = 0** → stdout. But when stdout is empty, stderr instead: plenty of
+  commands succeed with all their output on stderr (`tool --version`, `--help`,
+  informational messages). When stdout *does* have content, stderr is discarded,
+  so genuine noise (progress bars, warnings, `time(1)`) stays hidden.
+- **exit ≠ 0** → stderr (the error message — what you almost always want to see
+  when something broke), falling back to stdout when stderr is empty (e.g.,
+  `false` produces nothing on either).
 
 Examples:
 
 ```sh
-echo "good"; echo "warning" >&2          # exit=0 → output is "good"
-echo "noise" >&2; echo "result"          # exit=0 → output is "result"
-ls /nonexistent                          # exit≠0 → output is "ls: ... No such file"
+echo "good"; echo "warning" >&2          # exit=0, stdout present → "good"
+echo "noise" >&2; echo "result"          # exit=0, stdout present → "result"
+gq --version                             # exit=0, stdout empty   → the stderr version line
+ls /nonexistent                          # exit≠0                 → "ls: ... No such file"
 ```
 
 If you want both streams in the output, redirect explicitly:

@@ -161,11 +161,10 @@ sandboxed via CSP so an SVG carrying `<script>` stays inert.
 
 A command's stdout and stderr are captured separately. The saved output block contains:
 
-- the command's **stdout** if it exited 0 (stderr noise like progress bars, warnings, or timing info is discarded);
-- the command's **stderr** if it exited non-zero (the error message — what you almost always want to see when something failed);
-- stdout as a fallback when exit≠0 but stderr is empty (e.g., `false`).
+- on **exit 0**: stdout — but if stdout is empty, stderr instead. Many commands succeed with their output on stderr (`tool --version`, `--help`, informational messages), so this avoids a blank cell. When stdout has content, stderr is still discarded, so genuine noise (progress bars, warnings) stays hidden.
+- on **exit non-zero**: stderr (the error message) — falling back to stdout if stderr is empty (e.g., `false`).
 
-If you need *both* streams captured into the output, redirect explicitly: `cmd 2>&1`.
+Each branch prefers the stream that normally carries the useful content and falls back to the other, so a cell never renders blank while the other stream has something to show. If you need *both* streams together, redirect explicitly: `cmd 2>&1`.
 
 This is a deliberate departure from the v1 spec (which merged the streams). The `editable: true` format picker doesn't change which stream was saved — that's decided at run time by the exit code.
 

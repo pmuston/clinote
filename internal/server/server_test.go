@@ -672,6 +672,38 @@ func TestFailureShowsStderr(t *testing.T) {
 	}
 }
 
+// A command that succeeds but writes its only output to stderr — `tool
+// --version`, `--help`, and many informational commands do exactly this — must
+// not render a blank cell. Regression for gq --version showing nothing.
+func TestSuccessWithOnlyStderrShowsStderr(t *testing.T) {
+	src := "```sh\nprintf 'gq 0.1.0\\n' 1>&2\n```\n"
+	_, e, path := makeServer(t, src)
+
+	req := httptest.NewRequest(http.MethodPost, "/run/0", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		req := httptest.NewRequest(http.MethodGet, "/cell/0", nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if !strings.Contains(rec.Body.String(), "spinner") {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	onDisk, _ := os.ReadFile(path)
+	body := extractOutputBody(t, onDisk)
+	if strings.TrimSpace(body) != "gq 0.1.0" {
+		t.Errorf("expected stderr content in a succeeding cell's output, got %q", body)
+	}
+	// It still succeeded, so the exit code reflects that.
+	if !bytes.Contains(onDisk, []byte("exit=0")) {
+		t.Errorf("expected exit=0: %s", onDisk)
+	}
+}
+
 func TestStaticAssetsServed(t *testing.T) {
 	_, e, _ := makeServer(t, "")
 	for _, p := range []string{"/static/htmx.min.js", "/static/style.css", "/static/sortable.js"} {
