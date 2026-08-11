@@ -55,8 +55,17 @@ jobs:
           echo "--- what clinote wrote ---"
           cat conformance.md
 
-      - name: Judge it with notekit's checker
+      - name: Migrate every v1 fixture
         run: |
           cd /tmp/conf
-          go run github.com/pmuston/notekit/cmd/notefmt@latest -strict check conformance.md
+          cp "$GITHUB_WORKSPACE"/internal/migrate/testdata/v1/*.md .
+          for f in *.md; do
+            case "$f" in conformance.md) continue ;; esac
+            /tmp/clinote migrate "$f"
+          done
+
+      - name: Judge it all with notekit's checker
+        run: |
+          cd /tmp/conf
+          go run github.com/pmuston/notekit/cmd/notefmt@latest -strict check conformance.md *.v2.md
           go run github.com/pmuston/notekit/cmd/notefmt@latest list conformance.md

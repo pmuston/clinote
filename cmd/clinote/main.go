@@ -54,6 +54,11 @@ func runMain(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && args[0] == "new" {
 		sub, args = "new", args[1:]
 	}
+	// migrate has its own flags and never starts a server, so it is dispatched
+	// whole rather than sharing the flagset below.
+	if len(args) > 0 && args[0] == "migrate" {
+		return migrateCmd(args[1:], stdout, stderr)
+	}
 
 	fs := flag.NewFlagSet("clinote", flag.ContinueOnError)
 	fs.SetOutput(stderr)
@@ -68,9 +73,11 @@ func runMain(args []string, stdout, stderr io.Writer) int {
 	list := fs.Bool("list", false, "list candidate notebooks and exit")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "usage: clinote [flags] [notebook.md]\n"+
-			"       clinote new [flags] <notebook.md>\n\n"+
+			"       clinote new [flags] <notebook.md>\n"+
+			"       clinote migrate [flags] <notebook.md>...\n\n"+
 			"With no notebook, clinote uses the one in the current directory.\n"+
-			"`new` writes a notebook with one starter cell, then serves it.\n\nflags:\n")
+			"`new` writes a notebook with one starter cell, then serves it.\n"+
+			"`migrate` converts a clinote v1 notebook to the notekit format.\n\nflags:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
@@ -133,6 +140,14 @@ func runMain(args []string, stdout, stderr io.Writer) int {
 	} else {
 		path, err = notetool.Resolve(fs.Arg(0), ".")
 		if err != nil {
+			// A clinote v1 notebook is not a notekit notebook, and saying only
+			// that leaves the user holding a file of their own they cannot open.
+			// Name the fix instead.
+			if arg := fs.Arg(0); arg != "" && looksLikeV1(arg) {
+				fmt.Fprintf(stderr, "clinote: %s is a clinote v1 notebook\n"+
+					"         convert it with: clinote migrate %s\n", arg, arg)
+				return exitUsage
+			}
 			fmt.Fprintf(stderr, "clinote: %v\n", err)
 			return exitUsage
 		}
