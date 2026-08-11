@@ -41,8 +41,8 @@ arrangement. If clinote ever goes private, move the assets and set
 `RELEASE_REPO` in the build script to the tap.
 
 Note that a shared tap only avoids tag collisions because it holds no releases.
-If assets ever move there, tags must be namespaced per tool (`clinote-v0.1.1`),
-since several tools would otherwise compete for `v0.1.1` in one repo.
+If assets ever move there, tags must be namespaced per tool (`clinote-v2.0.0`),
+since several tools would otherwise compete for `v2.0.0` in one repo.
 
 ## Prerequisites
 
@@ -67,7 +67,7 @@ anyone who taps in the gap.
 
 ```go
 // internal/version/version.go
-const Version = "0.1.1"
+const Version = "2.0.0"
 ```
 
 The version is single-sourced here so the binary, the build script and the
@@ -80,8 +80,8 @@ Commit this **before** building. A dirty tree stamps the binary `modified`.
 
 ```sh
 git status --short        # must be empty
-git tag -a v0.1.1 -m "clinote v0.1.1"
-git push origin main && git push origin v0.1.1
+git tag -a v2.0.0 -m "clinote v2.0.0"
+git push origin main && git push origin v2.0.0
 ```
 
 Push **named tags only**. `git push --tags` pushes every local tag, including
@@ -100,24 +100,24 @@ No arguments: the version comes from the constant. Output:
 
 ```
 dist/
-  clinote-v0.1.1-darwin-arm64.tar.gz
-  clinote-v0.1.1-darwin-amd64.tar.gz
-  clinote-v0.1.1-linux-amd64.tar.gz
-  clinote-v0.1.1-linux-arm64.tar.gz
+  clinote-v2.0.0-darwin-arm64.tar.gz
+  clinote-v2.0.0-darwin-amd64.tar.gz
+  clinote-v2.0.0-linux-amd64.tar.gz
+  clinote-v2.0.0-linux-arm64.tar.gz
   checksums.txt
   THIRD-PARTY-NOTICES.md   ← also bundled inside every tarball
   clinote.rb               ← formula, ready for the tap
 ```
 
-Each tarball contains a top-level `clinote-v0.1.1-<os>-<arch>/` directory
+Each tarball contains a top-level `clinote-v2.0.0-<os>-<arch>/` directory
 holding the binary, `LICENSE`, `README.md` and `THIRD-PARTY-NOTICES.md`.
 
 **Confirm the binary self-identifies before going further:**
 
 ```sh
-tar xzf dist/clinote-v0.1.1-darwin-arm64.tar.gz -C /tmp
-/tmp/clinote-v0.1.1-darwin-arm64/clinote version
-# → clinote v0.1.1 (a1b2c3d4e5f6)     ← no ", modified"
+tar xzf dist/clinote-v2.0.0-darwin-arm64.tar.gz -C /tmp
+/tmp/clinote-v2.0.0-darwin-arm64/clinote version
+# → clinote v2.0.0 (a1b2c3d4e5f6)     ← no ", modified"
 ```
 
 `modified` means the tree was dirty at build time and the artifact matches no
@@ -126,15 +126,15 @@ commit. Rebuild from a clean tree; do not ship it.
 ### 4. Publish the GitHub release — before the formula
 
 ```sh
-gh release create v0.1.1 dist/clinote-v0.1.1-*.tar.gz dist/checksums.txt \
-  --repo pmuston/clinote --title "clinote v0.1.1" --notes "..."
+gh release create v2.0.0 dist/clinote-v2.0.0-*.tar.gz dist/checksums.txt \
+  --repo pmuston/clinote --title "clinote v2.0.0" --notes "..."
 ```
 
 The formula's URLs point at these assets. Publishing the formula first leaves a
 window where anyone installing gets a 404. Verify the upload landed:
 
 ```sh
-gh release view v0.1.1 --repo pmuston/clinote --json assets --jq '.assets[].name'
+gh release view v2.0.0 --repo pmuston/clinote --json assets --jq '.assets[].name'
 ```
 
 Expect all five.
@@ -144,7 +144,7 @@ Expect all five.
 ```sh
 cd ../homebrew-tap && git pull --ff-only
 cp ../clinote/dist/clinote.rb Formula/clinote.rb
-git add Formula/clinote.rb && git commit -m "clinote 0.1.1" && git push
+git add Formula/clinote.rb && git commit -m "clinote 2.0.0" && git push
 ```
 
 ### 6. Verify the path a user actually takes
@@ -239,7 +239,7 @@ SBOM Homebrew writes at install time:
 
 ```sh
 python3 -c "
-import json; d=json.load(open('$(brew --cellar clinote)/0.1.1/sbom.spdx.json'))
+import json; d=json.load(open('$(brew --cellar clinote)/2.0.0/sbom.spdx.json'))
 print([(p['name'], p.get('licenseConcluded')) for p in d['packages']])"
 ```
 

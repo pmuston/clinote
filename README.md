@@ -1,14 +1,29 @@
 # clinote
 
-A personal lab notebook for shell commands. One markdown file = one notebook. A persistent shell session is bound to the notebook for the lifetime of the server process — `cd`, env vars, and shell functions flow between cells. Commands run from fenced code cells; outputs are captured back into the same markdown file as adjacent fenced blocks.
+A personal lab notebook for shell commands. One markdown file is one notebook;
+cells are fenced `sh` blocks, and running one writes its result back into the same
+file. A single shell is bound to the notebook for the life of the server, so `cd`,
+environment variables and shell functions carry from one cell to the next.
 
-The on-disk file stays plain CommonMark — readable, grep-able, GitHub-renderable. Parsing then re-serialising a notebook without edits produces byte-identical output.
+The file stays plain CommonMark — readable, grep-able, and correct on GitHub.
 
-> For a tour from install to power-user patterns, read the [user guide](docs/user-guide.md).
+> **v2 is a rewrite on [notekit](https://github.com/pmuston/notekit).** The format,
+> parser, run scheduling and browser UI now belong to that library; clinote is the
+> shell executor. **v2 cannot open a v1 notebook** — see
+> [Migrating from v1](#migrating-from-v1).
+
+For a tour, read the [user guide](docs/user-guide.md).
 
 ## Install
 
-### Homebrew (macOS / Linux)
+Not yet released. v2 currently builds from source:
+
+```sh
+git clone https://github.com/pmuston/clinote
+cd clinote && go install ./cmd/clinote
+```
+
+Homebrew still serves **v1 (v0.1.7)** until 2.0.0 ships:
 
 ```sh
 brew tap pmuston/tap
@@ -16,173 +31,123 @@ brew trust pmuston/tap      # required for third-party taps
 brew install pmuston/tap/clinote
 ```
 
-Recent Homebrew refuses to install from an untrusted third-party tap, and the
-error it prints doesn't make the fix obvious — hence the `brew trust` line.
-
-Upgrade later with `brew upgrade pmuston/tap/clinote`.
-
-### From source (Go)
-
-```sh
-go install github.com/pmuston/clinote/cmd/clinote@latest
-```
-
-Requires Go 1.25+. Use this if you don't have Homebrew or want to track `main`.
-
 ## Usage
 
 ```sh
-clinote path/to/notebook.md         # open a notebook
-clinote new path/to/notebook.md     # create a notebook (with starter content) and open it
-clinote                             # list .md files in cwd
-clinote --no-browser notes.md       # don't auto-open the browser
+clinote notebook.md                  # serve a notebook
+clinote                              # use the notebook in the current directory
+clinote new notebook.md              # create one, then serve it
+clinote migrate old.md               # convert a v1 notebook
+clinote version
 ```
 
-The server binds to `127.0.0.1` on a free port and prints the URL to stdout. The browser opens automatically unless `BROWSER` is empty / `none` / `false` / `0`, or `--no-browser` is passed.
+| Flag | Meaning |
+|---|---|
+| `-addr` | Address to listen on. Default `127.0.0.1:8080`. |
+| `-shell` | `bash` or `zsh`. Defaults to your `$SHELL` when it is one of those. |
+| `-term` | `TERM` for the shell. Default `dumb`; a real value lets tools auto-detect colour. |
+| `-poll` | How often the browser polls a running cell. Default `500ms`. |
+| `-list` | List candidate notebooks and exit. |
 
-`clinote new` refuses to overwrite an existing file. The title in the scaffolded front matter is derived from the filename (e.g. `disk-usage.md` → `Disk usage`).
+clinote prints its URL and waits; **it does not open a browser** (v1 did). Ctrl-C
+stops it.
 
-## File format
+## The notebook format
 
-A notebook is a UTF-8 markdown file with optional YAML front matter and any mix of prose, command cells, and output cells.
+The format is notekit's, and its
+[specification](https://github.com/pmuston/notekit/blob/main/notekit-format-spec.md)
+is the authority. In short:
 
-### Front matter
-
-```yaml
+````markdown
 ---
-title: Disk usage investigation
-created: 2026-05-26T14:30:00Z
-shell: bash
+notekit: 1
+title: Disk usage
+notekit-tool: clinote
 ---
+
+## Largest directories
+
+```sh {format=csv}
+du -d1 -h | sort -hr | head -5
 ```
 
-Recognised fields:
-
-- `title` — string
-- `created` — RFC 3339 timestamp
-- `shell` — `bash` or `zsh` (default `bash`)
-- `editable` — `true` unlocks in-browser editing of sh command bodies (default `false`)
-- `width` — `full` to use the full window width for the notebook column (default is a narrow column suitable for prose reading)
-- `requires` — list of environment variable names the notebook needs; a banner names any that are unset. Reports only, never blocks, and cannot execute anything
-
-Unknown fields are preserved on save.
-
-Never `export` a credential in a cell — cell bodies are written to the `.md`
-verbatim. Export it in your shell before launching clinote; the runner inherits
-that environment. See the [user guide](docs/user-guide.md#secrets-and-required-environment).
-
-### Command cells
-
-Language tag `sh`. The body is sent verbatim to the persistent shell.
-
-````markdown
-```sh out=csv
-psql -c "select * from users" --csv
+```output {format=csv, run="2026-07-16T09:41:07Z", tool="clinote/2.0"}
+size,path
+1.2G,./data
 ```
 ````
 
-`out=text|csv|jsonl` hints the renderer; if absent, the output type is sniffed.
+Two rules catch people out:
 
-### Output cells
+- **A cell needs its own heading**, level 2–6. A section holds exactly one source
+  fence; a second fence in the same section is prose, silently
+  ([notekit#1](https://github.com/pmuston/notekit/issues/1)).
+- **Failures are `error` blocks**, not output with a bad exit code:
+  ` ```error {status=127, …} `.
 
-Written by the tool, language tag `output`. Required attributes: `type`, `exit`, `ran`, `dur`. Optional: `truncated=true`.
+Declare a result kind with `{format=csv}`, `{format=tsv}` or `{format=jsonl}` on
+the cell; tables render sortable in the browser and stay plain text on disk.
 
-````markdown
-```output type=text exit=0 ran=2026-05-26T14:31:12Z dur=120ms
-4.0K    /var/games
-2.1G    /var/log
-```
-````
+## Migrating from v1
 
-### Pairing
+v1 notebooks have no `notekit: 1` marker and no per-cell headings, so v2 refuses
+them and points here:
 
-An output block is paired with the command above it iff only whitespace separates them. Any intervening prose orphans the output and marks the command as unrun. There are no IDs or cross-references — pairing is strictly positional.
-
-## Rendering
-
-- **text** — wrapped in `<pre>`; ANSI SGR escapes (16 colours, bold, underline) render as inline-styled spans on the first paint after a run. The on-disk file always contains ANSI-stripped text, so reloads show plain.
-- **csv** — sortable HTML table; click a header to sort (numeric columns detected automatically).
-- **tsv** — same as CSV, tab-separated.
-- **jsonl** — sortable HTML table with the union of top-level keys as columns (alphabetical); nested values render as compact JSON strings.
-
-All table renderers cap displayed rows at 1000 with a "showing 1000 of N" notice. The full data stays in the `.md` file.
-
-### Triggering table rendering
-
-Add `out=csv`, `out=tsv`, or `out=jsonl` to the command's info string:
-
-````markdown
-```sh out=csv
-psql -c "select * from users" --csv
-```
-
-```sh out=tsv
-awk 'BEGIN{OFS="\t"} {print $1, $3, $5}' data.txt
-```
-
-```sh out=jsonl
-kubectl get pods -o json | jq -c '.items[]'
-```
-````
-
-When you run the cell, the output block is written with the matching `type=` and renders as a sortable table. Without the hint, output renders as plain text (the default).
-
-If you forget the hint and the output looks tabular, you can hand-edit `type=text` in the output block to `type=csv` / `type=tsv` / `type=jsonl` and reload.
-
-## Working in the browser
-
-- **Run** — each command cell has a Run button. Output is spliced into the `.md` file when it completes.
-- **Run all** / **run ↓** — run every cell from the top, or from one cell downward. Both confirm first and stop at the first non-zero exit, since a notebook is usually a chain and continuing past a failed stage produces plausible-looking wrong results. Use `cmd || true` for a cell that should survive failure. Interrupt aborts the batch.
-- **Edit prose** — hover over a prose paragraph and click _edit_ to swap to a textarea. Save persists immediately.
-- **Edit sh cells** — only when the notebook has `editable: true` in its YAML front matter. Each cell gets an _edit_ button next to Run; click to swap to a textarea, type a new command, save. Without the flag, the edit button isn't shown and the endpoint returns 403 — the safe default for shared / demo notebooks.
-- **Change output format** — only with `editable: true`. A dropdown next to the edit button lets you pick text / csv / tsv / jsonl after the fact. Selecting a value rewrites BOTH the command's `out=` attribute AND the existing output block's `type=`, so the on-disk file stays internally consistent and the next run will save with the new type automatically. Useful when you ran a command, saw the output was tabular, and want to reformat without re-running.
-- **+ sh cell** / **+ prose** — buttons at the bottom of the notebook append a new block and open its editor immediately (empty textarea, focused). For sh cells this only works with `editable: true`; without the flag the new cell appears in view mode. Prose always opens in edit mode.
-- **Delete (×)** — every block shows a delete button. Sh cells and orphan output blocks need `editable: true` to delete; prose can always be deleted. A confirmation dialog (`window.confirm`) appears before the deletion. Deleting an sh cell also removes its paired output block.
-- **Interrupt** — visible top-right while a cell is running; sends SIGINT to the foreground process group.
-
-## Images
-
-Files next to the notebook are served, so a plain markdown image link renders in
-the browser the same way it does on GitHub:
-
-````markdown
 ```sh
-mytool --format svg --out chart.svg
+clinote migrate notebooks/s88.md      # writes notebooks/s88.v2.md
+clinote migrate -dry-run notebooks/*.md
+clinote migrate -in-place notes.md    # keeps notes.md.v1.bak
 ```
 
-![chart](chart.svg)
-````
+Migration reports what it did and what could not come across, and **refuses to
+write if the cell count changed** — a stranded fence becomes prose silently, so
+counting is the only guard against a quietly gutted notebook.
 
-Only the notebook's own directory is reachable — traversal above it (including
-percent-encoded and via symlinks) and dotfiles are refused, and served files are
-sandboxed via CSP so an SVG carrying `<script>` stays inert.
+What changes: every cell gains a heading (invented from the command when there is
+none — rename freely, it costs nothing); failed results become `error` blocks;
+`dur=` is dropped, having no home in the format. Results keep their original
+timestamp and are marked `tool="clinote/1"`, because that is what produced them.
 
-## Output: stdout vs stderr
+## Output: stdout and stderr
 
-A command's stdout and stderr are captured separately. The saved output block contains:
+Both streams interleave as produced, exactly as in a terminal. A cell that exits
+zero writes an `output` block; a non-zero exit writes an `error` block carrying
+the status.
 
-- on **exit 0**: stdout — but if stdout is empty, stderr instead. Many commands succeed with their output on stderr (`tool --version`, `--help`, informational messages), so this avoids a blank cell. When stdout has content, stderr is still discarded, so genuine noise (progress bars, warnings) stays hidden.
-- on **exit non-zero**: stderr (the error message) — falling back to stdout if stderr is empty (e.g., `false`).
+v1 captured the two separately and picked one by exit code, suppressing stderr on
+success. The notekit format has one result body, so that distinction is gone —
+`cmd 2>/dev/null` if you want a noisy command quietened.
 
-Each branch prefers the stream that normally carries the useful content and falls back to the other, so a cell never renders blank while the other stream has something to show. If you need *both* streams together, redirect explicitly: `cmd 2>&1`.
+## Not in v2 yet
 
-This is a deliberate departure from the v1 spec (which merged the streams). The `editable: true` format picker doesn't change which stream was saved — that's decided at run time by the exit code.
+Present in v1, deliberately absent while the substrate settles. Most belong in
+notekit's `serve`, where sqlnote would get them too:
+
+- **run-from-here** — v2 has Run and Run all, but not "run this cell and below".
+- **Output format picker** — change `{format=…}` by editing the cell instead.
+- **`requires:`** — no banner for missing environment variables.
+- **`width: full`** and **`editable: true`** — the UI is always editable and one width.
+- **Files next to the notebook are not served**, so `![chart](chart.svg)` will not
+  render. notekit serves `<stem>.assets/` for sidecar artifacts only.
+- **`dur=`** — the format records `run` and `tool`, not elapsed time.
+
+## Building
+
+```sh
+make check         # build, vet, gofmt, test
+make conformance   # migrate the v1 corpus, judge it with notekit's notefmt
+make linux         # run the checks in a container
+```
+
+`make linux` is worth running before pushing: the shell tests exercise every
+supported shell and refuse to skip a missing one, so a macOS pass can still fail
+on CI where zsh is absent.
 
 ## Limitations
 
-- Single user, single notebook per server process.
-- `exit N` inside a cell will terminate the persistent shell. Use `return N` (inside a function) or `false` / `( ... ; exit N )` if you need a non-zero status without killing the session.
-- The in-memory notebook is the source of truth during a session. External edits to the `.md` file while the server is running will be overwritten on next save.
-- Interactive TUI commands (`vim`, `less`, `htop`) will hang the cell — use the **Interrupt** button to recover.
-- ANSI colour is a live-render nicety; reloaded notebooks show plain text.
-- Output is capped at 1 MiB per cell. Commands that produce more keep running; the excess is dropped and `truncated=true` is recorded.
-
-## Building from source
-
-```sh
-go test ./...
-go build ./cmd/clinote
-./clinote path/to/notebook.md
-```
-
-Requires Go 1.25+. The dependencies are minimal: Echo (HTTP), goldmark (prose rendering), yaml.v3, creack/pty, x/sys.
+- Single user, one notebook per server process.
+- The in-memory notebook is authoritative; external edits are overwritten on save.
+- Interactive TUI commands (`vim`, `less`, `htop`) hang the cell — use Interrupt.
+- Output is capped per cell; the excess is dropped and marked `truncated`.
+- `exit N` in a cell terminates the persistent shell; use `false` or a subshell.
+- ANSI colour renders live only; the file keeps plain text.

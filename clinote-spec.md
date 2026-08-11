@@ -1,5 +1,18 @@
 # clinote — v1 Specification
 
+> **Historical. This describes clinote v1 and is superseded.**
+>
+> v2 is built on [notekit](https://github.com/pmuston/notekit) and implements
+> that project's format, which is incompatible with the one below: it requires a
+> `notekit: 1` front-matter key and one cell per heading section, and writes
+> failures as `error` blocks rather than `output` with a non-zero `exit`.
+>
+> Kept for archaeology — several decisions here were carried forward, and the
+> reasoning behind them is recorded nowhere else. For what the tool does now, see
+> the [README](README.md) and the [user guide](docs/user-guide.md); for the
+> format, see notekit's specification. Convert v1 notebooks with
+> `clinote migrate`.
+
 A personal lab notebook for shell commands. One markdown file = one notebook. A persistent shell session is bound to the notebook for the lifetime of the server process. Commands are run from fenced code cells; outputs are captured back into the same markdown file as adjacent fenced blocks.
 
 This document is the v1 contract. Anything not specified here is out of scope. A `FUTURE.md` section at the end lists deferred features — do not implement them.
