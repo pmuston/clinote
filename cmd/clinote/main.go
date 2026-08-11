@@ -89,6 +89,11 @@ func runMain(args []string, stdout, stderr io.Writer) int {
 	term := fs.String("term", "dumb", "TERM for the shell; a real value enables colour auto-detection")
 	poll := fs.Duration("poll", serve.DefaultPollInterval, "how often the browser polls a running cell")
 	list := fs.Bool("list", false, "list candidate notebooks and exit")
+	// The grant for §2.4. It is a flag rather than a front-matter key on purpose:
+	// a notebook declaring `local-files: true` is requesting this, and a notebook
+	// is exactly what someone else may have written. Off unless you say so.
+	localFiles := fs.Bool("allow-local-files", false,
+		"serve files from the notebook's directory, so its image links resolve")
 	fs.Usage = func() {
 		fmt.Fprintf(stderr, "usage: clinote [flags] [notebook.md]\n"+
 			"       clinote new [flags] <notebook.md>\n"+
@@ -196,7 +201,9 @@ func runMain(args []string, stdout, stderr io.Writer) int {
 	}
 	defer func() { _ = sched.Shutdown(ctx) }()
 
-	srv, err := serve.New(sched, path, serve.WithPollInterval(*poll))
+	srv, err := serve.New(sched, path,
+		serve.WithPollInterval(*poll),
+		serve.WithLocalFiles(*localFiles))
 	if err != nil {
 		fmt.Fprintf(stderr, "clinote: %v\n", err)
 		return exitUsage
