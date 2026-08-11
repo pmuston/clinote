@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Test
+        run: go test -race -timeout 5m ./...
+
+  # clinote and notekit share no code by necessity — only a format. This job is what
+  # keeps that true: it makes clinote write a notebook and has notekit's own checker
+  # judge it. If clinote ever emits something the kit cannot read, this fails here
+  # rather than in someone's notebook.
+  conformance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: Build clinote
+        run: go build -o /tmp/clinote ./cmd/clinote
+
+      - name: Scaffold a notebook with clinote
+        run: |
+          mkdir -p /tmp/conf && cd /tmp/conf
+          # `new` serves after creating, so start it, let it write, then stop it.
+          /tmp/clinote new -addr 127.0.0.1:8099 conformance.md &
+          for _ in $(seq 1 50); do [ -s conformance.md ] && break; sleep 0.2; done
+          pkill -f '/tmp/clinote' || true
+          echo "--- what clinote wrote ---"
+          cat conformance.md
+
+      - name: Judge it with notekit's checker
+        run: |
+          cd /tmp/conf
+          go run github.com/pmuston/notekit/cmd/notefmt@latest -strict check conformance.md
+          go run github.com/pmuston/notekit/cmd/notefmt@latest list conformance.md

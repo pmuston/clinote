@@ -1,3 +1,20 @@
+//go:build unix
+
+// Command clinote is a shell notebook: a notekit notebook whose cells are shell
+// commands, run in one persistent shell and served in the browser.
+//
+// This is clinote v2, and the whole binary is an executor plus a `main`. Every other
+// concern — the on-disk format, byte-range splice, run scheduling, capture limits,
+// signal-safe teardown, the HTMX UI — belongs to the kit. All pty knowledge lives in
+// shell.go and in no kit package.
+//
+//	clinote                    pick the notebook in the current directory
+//	clinote notebook.md        serve that notebook
+//	clinote new notebook.md    create a notebook, then serve it
+//	clinote -list              list candidate notebooks and exit
+//
+// Exit status is 0 on a clean shutdown, 1 if the server failed, and 2 for a usage or
+// I/O failure.
 package main
 
 import (
@@ -5,300 +22,213 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"net"
+	"io"
 	"net/http"
 	"os"
-	"os/exec"
-	"os/signal"
 	"path/filepath"
-	"runtime"
-	"strings"
-	"syscall"
 	"time"
 
-	"github.com/labstack/echo/v4"
-	"github.com/labstack/echo/v4/middleware"
-	"github.com/pmuston/clinote/internal/notebook"
-	"github.com/pmuston/clinote/internal/runner"
-	"github.com/pmuston/clinote/internal/server"
-	"github.com/pmuston/clinote/internal/version"
+	"github.com/pmuston/notekit/doc"
+	"github.com/pmuston/notekit/notetool"
+	"github.com/pmuston/notekit/run"
+	"github.com/pmuston/notekit/serve"
 )
 
-// DocsURL is the canonical online documentation, surfaced in the usage text.
-const DocsURL = "https://pmuston.github.io/clinote"
+// version is the provenance value written into every result block as `tool` (§6).
+const version = "clinote/2.0"
 
-// versionLine is what `clinote version` prints. The leading binary name is not
-// decoration: the Homebrew formula's test block asserts on "clinote v", and a
-// running instance identifying itself by name is what makes a stale deployment
-// obvious in logs.
-func versionLine() string {
-	return "clinote v" + version.String()
-}
+const (
+	exitOK      = 0
+	exitProblem = 1
+	exitUsage   = 2
+)
 
 func main() {
-	// Subcommand dispatch.
-	if len(os.Args) >= 2 {
-		switch os.Args[1] {
-		case "new":
-			if err := newCmd(os.Args[2:]); err != nil {
-				fmt.Fprintln(os.Stderr, "clinote:", err)
-				os.Exit(1)
-			}
-			return
-		case "version", "--version", "-v":
-			fmt.Println(versionLine())
-			return
-		}
-	}
-
-	flag.Usage = usage
-	noBrowser := flag.Bool("no-browser", false, "Do not open the browser")
-	showVersion := flag.Bool("version", false, "Print version and exit")
-	flag.Parse()
-
-	if *showVersion {
-		fmt.Println(versionLine())
-		return
-	}
-
-	if err := run(flag.Arg(0), *noBrowser); err != nil {
-		fmt.Fprintln(os.Stderr, "clinote:", err)
-		os.Exit(1)
-	}
+	os.Exit(runMain(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, "Usage:")
-	fmt.Fprintln(os.Stderr, "  clinote [flags] [path/to/notebook.md]   open a notebook")
-	fmt.Fprintln(os.Stderr, "  clinote new [flags] <path>              create a notebook and open it")
-	fmt.Fprintln(os.Stderr, "  clinote version                         print version and exit")
-	fmt.Fprintln(os.Stderr, "  clinote                                 list .md files in cwd")
-	fmt.Fprintln(os.Stderr)
-	fmt.Fprintln(os.Stderr, "Flags:")
-	flag.PrintDefaults()
-	fmt.Fprintf(os.Stderr, "\ndocs: %s  (also: man clinote)\n", DocsURL)
-}
-
-func run(path string, noBrowser bool) error {
-	if path == "" {
-		return pickerLoop()
+func runMain(args []string, stdout, stderr io.Writer) int {
+	// Strip the subcommand before parsing, so `new` accepts exactly the same flags as a
+	// plain invocation and there is only one flagset to keep in step.
+	sub := ""
+	if len(args) > 0 && args[0] == "new" {
+		sub, args = "new", args[1:]
 	}
-	return serve(path, noBrowser)
-}
 
-// newCmd handles the `clinote new <path>` subcommand: writes a starter
-// notebook to path (refusing to overwrite), then opens it just like
-// `clinote <path>` would.
-func newCmd(args []string) error {
-	fs := flag.NewFlagSet("new", flag.ExitOnError)
-	noBrowser := fs.Bool("no-browser", false, "Do not open the browser")
+	fs := flag.NewFlagSet("clinote", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	addr := fs.String("addr", "127.0.0.1:8080", "address to listen on")
+	shell := fs.String("shell", defaultShell(), "shell to run cells in (bash or zsh)")
+	// TERM=dumb is clinote v1's proven choice: it stops the shell emitting
+	// cursor-positioning sequences that would land in a cell's captured output. Set a
+	// real terminal type to let tools auto-detect colour, which the UI renders live
+	// and the format strips from disk.
+	term := fs.String("term", "dumb", "TERM for the shell; a real value enables colour auto-detection")
+	poll := fs.Duration("poll", serve.DefaultPollInterval, "how often the browser polls a running cell")
+	list := fs.Bool("list", false, "list candidate notebooks and exit")
 	fs.Usage = func() {
-		fmt.Fprintln(os.Stderr, "Usage: clinote new [flags] <path>")
+		fmt.Fprintf(stderr, "usage: clinote [flags] [notebook.md]\n"+
+			"       clinote new [flags] <notebook.md>\n\n"+
+			"With no notebook, clinote uses the one in the current directory.\n"+
+			"`new` writes a notebook with one starter cell, then serves it.\n\nflags:\n")
 		fs.PrintDefaults()
 	}
 	if err := fs.Parse(args); err != nil {
-		return err
+		return exitUsage
 	}
-	if fs.NArg() != 1 {
+	if fs.NArg() > 1 {
+		// `clinote -addr X new n.md` parses as two paths, because flag stops at the
+		// first non-flag argument. Say so, rather than printing usage and leaving the
+		// user to spot that the subcommand has to come first.
+		for _, a := range args {
+			if a == "new" {
+				fmt.Fprintf(stderr, "clinote: `new` must come first: "+
+					"clinote new [flags] <notebook.md>\n")
+				return exitUsage
+			}
+		}
 		fs.Usage()
-		return errors.New("expected exactly one path")
+		return exitUsage
 	}
-	path := fs.Arg(0)
-	if err := createNotebook(path); err != nil {
-		return err
-	}
-	fmt.Fprintln(os.Stderr, "created", path)
-	return serve(path, *noBrowser)
-}
 
-// createNotebook writes a starter notebook to path. The file is refused if it
-// already exists. Title is derived from the filename.
-func createNotebook(path string) error {
-	abs, err := filepath.Abs(path)
+	if *list {
+		found, err := notetool.FindNotebooks(".")
+		if err != nil {
+			fmt.Fprintf(stderr, "clinote: %v\n", err)
+			return exitUsage
+		}
+		if len(found) == 0 {
+			fmt.Fprintln(stdout, "no notekit notebooks in the current directory")
+			return exitOK
+		}
+		for _, p := range found {
+			fmt.Fprintln(stdout, p)
+		}
+		return exitOK
+	}
+
+	ex, err := NewShellExecutor(*shell, *term, doc.OutputCap)
 	if err != nil {
-		return err
+		fmt.Fprintf(stderr, "%v\n", err)
+		return exitUsage
 	}
-	if _, err := os.Stat(abs); err == nil {
-		return fmt.Errorf("%s already exists; refusing to overwrite", path)
-	} else if !os.IsNotExist(err) {
-		return err
+
+	// What this binary is. Peers is nil: clinote ships in its own repository and knows
+	// of no sibling notebook binaries, which notetool documents as the ordinary case
+	// for a tool built outside the kit's module.
+	self := notetool.Tool{Name: "clinote", Lang: ex.Lang()}
+
+	var path string
+	if sub == "new" {
+		if fs.NArg() != 1 {
+			fmt.Fprintf(stderr, "clinote: `new` needs exactly one path\n")
+			return exitUsage
+		}
+		path = fs.Arg(0)
+		if err := self.Create(path, starterCell(ex.Lang())); err != nil {
+			fmt.Fprintf(stderr, "clinote: %v\n", err)
+			return exitUsage
+		}
+		fmt.Fprintf(stdout, "clinote: created %s\n", path)
+	} else {
+		path, err = notetool.Resolve(fs.Arg(0), ".")
+		if err != nil {
+			fmt.Fprintf(stderr, "clinote: %v\n", err)
+			return exitUsage
+		}
+		// A refusal stops us; a warning is said and stepped over. The advisory tool key
+		// must never decide whether a notebook opens (§2.1).
+		warn, err := self.Inspect(path)
+		if err != nil {
+			fmt.Fprintf(stderr, "clinote: %v\n", err)
+			return exitUsage
+		}
+		if warn != "" {
+			fmt.Fprintf(stderr, "clinote: warning: %s\n", warn)
+		}
 	}
-	title := deriveTitle(abs)
-	body := starterNotebook(title, time.Now().UTC().Format(time.RFC3339))
-	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
-		return fmt.Errorf("write notebook: %w", err)
+
+	ctx := context.Background()
+	sched := run.New(run.WithTool(version))
+
+	// The kit owns signal handling, so a Ctrl-C destroys the shell rather than
+	// leaving a pty child behind.
+	signalled, stopSignals := sched.HandleSignals(stderr)
+	defer stopSignals()
+
+	if err := sched.Open(ctx, path, ex); err != nil {
+		fmt.Fprintf(stderr, "clinote: %v\n", err)
+		return exitUsage
 	}
-	return nil
+	defer func() { _ = sched.Shutdown(ctx) }()
+
+	srv, err := serve.New(sched, path, serve.WithPollInterval(*poll))
+	if err != nil {
+		fmt.Fprintf(stderr, "clinote: %v\n", err)
+		return exitUsage
+	}
+
+	httpSrv := &http.Server{
+		Addr:              *addr,
+		Handler:           srv.Echo(),
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+
+	errs := make(chan error, 1)
+	go func() {
+		fmt.Fprintf(stdout, "clinote: http://%s  (%s, %s)\n", *addr, path, *shell)
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			errs <- err
+			return
+		}
+		errs <- nil
+	}()
+
+	select {
+	case err := <-errs:
+		if err != nil {
+			fmt.Fprintf(stderr, "clinote: %v\n", err)
+			return exitProblem
+		}
+		return exitOK
+	case <-signalled:
+		// Sessions are already destroyed; drain the HTTP server so an in-flight
+		// request is not cut off mid-response.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := httpSrv.Shutdown(shutdownCtx); err != nil {
+			fmt.Fprintf(stderr, "clinote: %v\n", err)
+			return exitProblem
+		}
+		fmt.Fprintln(stdout, "clinote: stopped")
+		return exitOK
+	}
 }
 
-func deriveTitle(path string) string {
-	name := filepath.Base(path)
-	name = strings.TrimSuffix(name, ".md")
-	name = strings.ReplaceAll(name, "-", " ")
-	name = strings.ReplaceAll(name, "_", " ")
-	if name == "" {
-		return "Notebook"
+// defaultShell picks the user's shell when it is one clinote supports.
+func defaultShell() string {
+	base := filepath.Base(os.Getenv("SHELL"))
+	switch base {
+	case "bash", "zsh":
+		return base
 	}
-	return strings.ToUpper(name[:1]) + name[1:]
+	return "bash"
 }
 
-// starterNotebook returns the template that `clinote new` writes. One example
-// command cell so the first thing a user does is click Run and see it work.
+// filepathDir is a tiny indirection so shell.go need not import path/filepath.
+func filepathDir(path string) string { return filepath.Dir(path) }
+
+// starterCell is the cell `new` writes. A new notebook gets one cell of the tool's own
+// language and nothing else — no invented prose, no placeholder result (§10 f).
 //
-// Defaults `editable: true` and `width: full` because a notebook you're just
-// creating is almost certainly one you want to author freely (edit cells,
-// see wide output). Delete those lines from the YAML if you want to lock the
-// notebook down later.
-func starterNotebook(title, created string) string {
-	return "---\n" +
-		"title: " + title + "\n" +
-		"created: " + created + "\n" +
-		"shell: bash\n" +
-		"editable: true\n" +
-		"width: full\n" +
-		"---\n" +
-		"\n" +
-		"# " + title + "\n" +
-		"\n" +
-		"```sh\n" +
-		"echo \"hello from clinote\"\n" +
-		"```\n"
-}
-
-func serve(path string, noBrowser bool) error {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return err
+// It is not merely a courtesy. A notebook's engine is derived from the info-string tags its
+// cells carry (§2.1), so a notebook with no cells has nothing to derive from. The starter
+// cell is what makes every notebook's engine knowable from the moment it is created, which
+// is why `new` writes one rather than an empty file.
+func starterCell(lang string) doc.NewCell {
+	return doc.NewCell{
+		Heading: "First command",
+		Lang:    lang,
+		Body:    "echo \"hello from clinote\"\n",
 	}
-	f, err := os.Open(abs)
-	if err != nil {
-		return fmt.Errorf("open notebook: %w", err)
-	}
-	nb, err := notebook.Parse(f)
-	f.Close()
-	if err != nil {
-		return fmt.Errorf("parse notebook: %w", err)
-	}
-
-	shell := nb.FrontMatter.Shell
-	if shell == "" {
-		shell = "bash"
-	}
-	r, err := runner.New(shell)
-	if err != nil {
-		return fmt.Errorf("start runner: %w", err)
-	}
-	defer r.Close()
-
-	srv, err := server.New(abs, nb, r)
-	if err != nil {
-		return err
-	}
-
-	e := echo.New()
-	e.HideBanner = true
-	e.HidePort = true
-	e.Use(middleware.Recover())
-	srv.Register(e)
-
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
-	url := "http://" + ln.Addr().String()
-	fmt.Println(url)
-
-	go func() {
-		e.Listener = ln
-		if err := e.Start(""); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			fmt.Fprintln(os.Stderr, "server error:", err)
-		}
-	}()
-
-	if !noBrowser && browserAllowed() {
-		go func() {
-			time.Sleep(150 * time.Millisecond)
-			openBrowser(url)
-		}()
-	}
-
-	sigCh := make(chan os.Signal, 2)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
-
-	// A second Ctrl-C forces exit. The graceful path below should always
-	// complete now that runner.Close no longer blocks on a hung command, but a
-	// stuck shutdown must never leave the terminal wedged — the whole point of
-	// the signal is to regain control.
-	go func() {
-		<-sigCh
-		fmt.Fprintln(os.Stderr, "clinote: forced exit")
-		os.Exit(1)
-	}()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	return e.Shutdown(ctx)
-}
-
-// browserAllowed checks the BROWSER env var. If it's set to a value indicating
-// "no browser" (empty, "none"), we skip the open. Otherwise we honour the
-// system default. (§3.2.)
-func browserAllowed() bool {
-	v, set := os.LookupEnv("BROWSER")
-	if !set {
-		return true
-	}
-	v = strings.TrimSpace(strings.ToLower(v))
-	switch v {
-	case "", "none", "false", "0":
-		return false
-	}
-	return true
-}
-
-func openBrowser(url string) {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("open", url)
-	case "linux":
-		cmd = exec.Command("xdg-open", url)
-	case "windows":
-		cmd = exec.Command("cmd", "/c", "start", url)
-	}
-	if cmd != nil {
-		_ = cmd.Start()
-	}
-}
-
-// pickerLoop runs a minimal picker server when invoked without a path.
-// It serves a list of .md files in the cwd; the user picks one, the server
-// restarts with that path. For v1 we simplify: print the list and prompt to
-// re-invoke with a path.
-func pickerLoop() error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(cwd)
-	if err != nil {
-		return err
-	}
-	var files []string
-	for _, e := range entries {
-		if !e.IsDir() && strings.HasSuffix(e.Name(), ".md") {
-			files = append(files, e.Name())
-		}
-	}
-	if len(files) == 0 {
-		return fmt.Errorf("no .md files in %s; pass a path explicitly", cwd)
-	}
-	fmt.Println("Notebooks in", cwd+":")
-	for _, f := range files {
-		fmt.Println("  ", f)
-	}
-	fmt.Println()
-	fmt.Println("Run: clinote <filename>")
-	return nil
 }
