@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"time"
 
+	clinoteversion "github.com/pmuston/clinote/internal/version"
 	"github.com/pmuston/notekit/doc"
 	"github.com/pmuston/notekit/notetool"
 	"github.com/pmuston/notekit/run"
@@ -35,7 +36,9 @@ import (
 )
 
 // version is the provenance value written into every result block as `tool` (§6).
-const version = "clinote/2.0"
+// It is derived from the single version constant so a notebook's `tool` and what
+// `clinote version` reports cannot disagree.
+var version = clinoteversion.Provenance()
 
 const (
 	exitOK      = 0
@@ -58,6 +61,16 @@ func runMain(args []string, stdout, stderr io.Writer) int {
 	// whole rather than sharing the flagset below.
 	if len(args) > 0 && args[0] == "migrate" {
 		return migrateCmd(args[1:], stdout, stderr)
+	}
+	// A released binary has to be able to say which build it is: the Homebrew
+	// formula's test block runs exactly this, and a stale install is otherwise
+	// indistinguishable from a current one.
+	if len(args) > 0 {
+		switch args[0] {
+		case "version", "--version", "-v":
+			fmt.Fprintln(stdout, "clinote v"+clinoteversion.String())
+			return exitOK
+		}
 	}
 
 	fs := flag.NewFlagSet("clinote", flag.ContinueOnError)
