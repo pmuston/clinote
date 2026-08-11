@@ -155,7 +155,9 @@ func TestEndToEnd(t *testing.T) {
 		t.Errorf("error block missing:\n%s", got)
 	}
 	// Provenance names this tool and version.
-	if !strings.Contains(got, `tool="clinote/2.0"`) {
+	// Against the derived value, not a literal: hard-coding the version here means
+	// every minor bump fails a test that has nothing to do with the change.
+	if !strings.Contains(got, `tool="`+version+`"`) {
 		t.Errorf("provenance missing:\n%s", got)
 	}
 	// Prose is untouched.
