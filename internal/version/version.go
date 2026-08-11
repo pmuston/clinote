@@ -9,11 +9,27 @@ package version
 import (
 	"fmt"
 	"runtime/debug"
+	"strings"
 )
 
 // Version is the released version. Bump it whenever the interface changes so
 // a running instance can be told apart from an older one.
-const Version = "0.1.7"
+const Version = "2.0.0"
+
+// Provenance is the `tool` value written into every result block (§6), in the
+// format's name/version shape.
+//
+// It is derived from Version rather than written out again, so the string in a
+// notebook and the string `clinote version` prints cannot drift. Major.minor is
+// enough: a result records which tool wrote it, not which patch.
+func Provenance() string {
+	major, rest, ok := strings.Cut(Version, ".")
+	if !ok {
+		return "clinote/" + Version
+	}
+	minor, _, _ := strings.Cut(rest, ".")
+	return "clinote/" + major + "." + minor
+}
 
 // String returns the version plus the VCS revision Go recorded at build time,
 // e.g. "0.1.0 (a1b2c3d4e5f6)".
