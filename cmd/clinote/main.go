@@ -40,6 +40,11 @@ import (
 // `clinote version` reports cannot disagree.
 var version = clinoteversion.Provenance()
 
+// DocsURL is the canonical online documentation, surfaced in the usage text.
+// Terse help, a man page and a web page are three layers of the same thing, and
+// the footer is what connects them for someone who only ever runs `-h`.
+const DocsURL = "https://pmuston.github.io/clinote"
+
 const (
 	exitOK      = 0
 	exitProblem = 1
@@ -92,6 +97,7 @@ func runMain(args []string, stdout, stderr io.Writer) int {
 			"`new` writes a notebook with one starter cell, then serves it.\n"+
 			"`migrate` converts a clinote v1 notebook to the notekit format.\n\nflags:\n")
 		fs.PrintDefaults()
+		fmt.Fprintf(stderr, "\ndocs: %s  (also: man clinote)\n", DocsURL)
 	}
 	if err := fs.Parse(args); err != nil {
 		return exitUsage
