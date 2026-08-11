@@ -13,7 +13,7 @@ import (
 
 // Version is the released version. Bump it whenever the interface changes so
 // a running instance can be told apart from an older one.
-const Version = "0.1.6"
+const Version = "0.1.7"
 
 // String returns the version plus the VCS revision Go recorded at build time,
 // e.g. "0.1.0 (a1b2c3d4e5f6)".
