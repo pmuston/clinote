@@ -16,19 +16,16 @@ For a tour, read the [user guide](docs/user-guide.md).
 
 ## Install
 
-Not yet released. v2 currently builds from source:
-
-```sh
-git clone https://github.com/pmuston/clinote
-cd clinote && go install ./cmd/clinote
-```
-
-Homebrew still serves **v1 (v0.1.7)** until 2.0.0 ships:
-
 ```sh
 brew tap pmuston/tap
 brew trust pmuston/tap      # required for third-party taps
 brew install pmuston/tap/clinote
+```
+
+Or from source, requiring Go 1.25+:
+
+```sh
+go install github.com/pmuston/clinote/cmd/clinote@latest
 ```
 
 ## Usage
@@ -48,6 +45,7 @@ clinote version
 | `-term` | `TERM` for the shell. Default `dumb`; a real value lets tools auto-detect colour. |
 | `-poll` | How often the browser polls a running cell. Default `500ms`. |
 | `-list` | List candidate notebooks and exit. |
+| `-allow-local-files` | Serve files from the notebook's directory so its image links resolve. Off by default. |
 
 clinote prints its URL and waits; **it does not open a browser** (v1 did). Ctrl-C
 stops it.
@@ -88,6 +86,14 @@ Two rules catch people out:
 Declare a result kind with `{format=csv}`, `{format=tsv}` or `{format=jsonl}` on
 the cell; tables render sortable in the browser and stay plain text on disk.
 
+Three front-matter keys affect the reader:
+
+| Key | Effect |
+|---|---|
+| `width: full` | Use the whole window instead of a reading column. |
+| `editable: false` | Withhold editing. **Never** gates running — a notebook handed out to be worked through still runs. A guard rail, not a control: anyone can edit the file in their editor. |
+| `local-files: true` | Declare that the notebook shows files from its directory. Requests only — `-allow-local-files` is what grants it. |
+
 ## Migrating from v1
 
 v1 notebooks have no `notekit: 1` marker and no per-cell headings, so v2 refuses
@@ -126,9 +132,6 @@ notekit's `serve`, where sqlnote would get them too:
 - **run-from-here** — v2 has Run and Run all, but not "run this cell and below".
 - **Output format picker** — change `{format=…}` by editing the cell instead.
 - **`requires:`** — no banner for missing environment variables.
-- **`width: full`** and **`editable: true`** — the UI is always editable and one width.
-- **Files next to the notebook are not served**, so `![chart](chart.svg)` will not
-  render. notekit serves `<stem>.assets/` for sidecar artifacts only.
 - **`dur=`** — the format records `run` and `tool`, not elapsed time.
 
 ## Building

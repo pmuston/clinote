@@ -1,4 +1,4 @@
-% clinote 1 "2026-08-11" "clinote 2.0.0" "clinote Manual"
+% clinote 1 "2026-08-11" "clinote 2.1.0" "clinote Manual"
 
 <!--
   The first line above becomes the raw .TH arguments, in order:
@@ -77,6 +77,15 @@ keep.
 **-list**
 : List candidate notebooks in the current directory and exit.
 
+**-allow-local-files**
+: Serve files from the notebook's own directory, so an image link in its prose
+resolves. Off by default. A notebook declares the need with `local-files: true`
+(§2.4) but cannot grant it: a notebook is the part someone else may have written,
+and a file that could authorise reading its neighbours would be authorising
+itself. Serving is confined to that directory — paths escaping it, dot-prefixed
+components and directories are refused, and files are sent with headers that stop
+the browser executing them.
+
 Flags for **migrate**:
 
 **-dry-run**
@@ -91,7 +100,20 @@ new file _name_`.v2.md` is written and the original left alone.
 The format belongs to notekit; its specification is authoritative. In outline:
 
 Front matter must carry `notekit: 1`. `title` and `shell` are honoured, and
-unknown keys are preserved.
+unknown keys are preserved. Three further keys affect the reader:
+
+**width**
+: `full` uses the whole window rather than a reading column.
+
+**editable**
+: `false` withholds editing — the source, prose, and adding, deleting or moving
+cells. It never gates running, so a notebook handed to someone to work through
+still runs; a guard rail against the accidental edit, not a control, since anyone
+can edit the file in their editor.
+
+**local-files**
+: `true` declares that the notebook displays files from its own directory. It
+requests only; see **-allow-local-files**.
 
 A **cell** is an ATX heading of level 2–6, optional prose, then a fenced code
 block tagged `sh`. A heading's section holds exactly **one** source fence: a
@@ -213,8 +235,8 @@ Interrupt button.
 `truncated`.
 - `exit N` in a cell terminates the persistent shell. Use `false`, `return` inside
 a function, or a subshell.
-- Files beside the notebook are not served, so an image link in a notebook will
-not render in the browser.
+- Files beside the notebook are served only with **-allow-local-files**, so an
+image link will not render until that is given.
 
 # SEE ALSO
 

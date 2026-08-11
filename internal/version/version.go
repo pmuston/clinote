@@ -14,7 +14,7 @@ import (
 
 // Version is the released version. Bump it whenever the interface changes so
 // a running instance can be told apart from an older one.
-const Version = "2.0.0"
+const Version = "2.1.0"
 
 // Provenance is the `tool` value written into every result block (§6), in the
 // format's name/version shape.

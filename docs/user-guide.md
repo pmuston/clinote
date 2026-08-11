@@ -40,21 +40,19 @@ interactive TUI programs.
 
 ## Install
 
-Not yet released. Build from source:
-
 ```sh
-git clone https://github.com/pmuston/clinote
-cd clinote && go install ./cmd/clinote
+brew tap pmuston/tap
+brew trust pmuston/tap   # required for third-party taps
+brew install pmuston/tap/clinote
 ```
 
-Homebrew still serves **v1** until 2.0.0 ships — `brew install pmuston/tap/clinote`
-gets you the previous tool, which uses a different, incompatible format.
+Or from source: `go install github.com/pmuston/clinote/cmd/clinote@latest`.
 
 Check which you have:
 
 ```sh
 clinote version
-# clinote v2.0.0 (b93d09ef6e6c)
+# clinote v2.1.0 (a1b2c3d4e5f6)
 ```
 
 A `, modified` suffix means the binary was built from a dirty tree.
@@ -97,7 +95,24 @@ That is the whole loop.
 **Front matter** — `notekit: 1` marks the file as a notebook and is required.
 `notekit-tool: clinote` records which tool wrote it (advisory; it never decides
 whether a notebook opens). `title` and `shell` are honoured. Unknown keys are
-preserved.
+preserved. Three keys change how a reader treats the notebook:
+
+| Key | Effect |
+|---|---|
+| `width: full` | Use the whole window rather than a reading column. |
+| `editable: false` | Withhold editing: the source, prose, and adding, deleting or moving cells. |
+| `local-files: true` | Declare that the notebook displays files from its own directory. |
+
+`editable: false` **never gates running** — a notebook handed to someone to work
+through is meant to be run, and running still writes results. It is a guard rail
+against the accidental edit, not a control: anyone can edit the file in their
+editor, and should be able to.
+
+`local-files: true` only *declares*. The grant is `-allow-local-files` on the
+command line, because a notebook is exactly the part someone else may have
+written, and a file that could authorise reading its neighbours would be
+authorising itself. Without the flag the page says so rather than showing a broken
+image.
 
 **A cell** is a heading of level 2–6, optional prose, then a fenced code block:
 
@@ -376,9 +391,11 @@ cell `{format=jsonl}` renders it as a sortable table.
 `gfig check` is its own cell so a failure stops there, with `gfig check`'s message
 in an `error` block, rather than rendering a broken figure.
 
-**One caveat.** The rendered `jacket-loop.svg` **will not display in the browser**:
-v2 does not serve files sitting next to the notebook. v1 did. Open the file
-directly for now.
+**Showing the figure.** Add `local-files: true` to the front matter and start
+clinote with `-allow-local-files`; then `![jacket loop](jacket-loop.svg)` renders.
+The notebook declares the need and the flag grants it, because a notebook is the
+part someone else may have written — see the [front-matter
+reference](#front-matter-reference).
 
 ## CLI reference
 
@@ -396,6 +413,7 @@ clinote version                    # also --version, -v
 | `-term` | `dumb` | `TERM` for the shell; a real value enables colour auto-detection. |
 | `-poll` | `500ms` | How often the browser polls a running cell. |
 | `-list` | — | List candidate notebooks and exit. |
+| `-allow-local-files` | off | Serve files from the notebook's directory, confined to it. |
 
 `migrate` flags: `-dry-run` (report only), `-in-place` (rewrite, keeping
 `<name>.v1.bak`).
@@ -419,8 +437,8 @@ and prefer `cat`, `head`, `tail`.
 **ANSI colour is live-only.** The file holds plain text; `-term` with a real
 terminal type enables colour in the browser during a session.
 
-**Images are not served.** `![chart](chart.svg)` will not render — see the worked
-example's caveat.
+**Images need the grant.** `![chart](chart.svg)` renders only when the notebook
+says `local-files: true` and clinote is started with `-allow-local-files`.
 
 **A second fence in a section is silently prose.** The single most likely way to
 lose work; give every cell its own heading.
