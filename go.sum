@@ -12,8 +12,8 @@ github.com/mattn/go-isatty v0.0.22 h1:j8l17JJ9i6VGPUFUYoTUKPSgKe/83EYU2zBC7YNKMw
 github.com/mattn/go-isatty v0.0.22/go.mod h1:ZXfXG4SQHsB/w3ZeOYbR0PrPwLy+n6xiMrJlRFqopa4=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/pmuston/notekit v0.0.0-20260727053702-602cd9c8f375 h1:s9nd7T2LiyqhNZEs0un73wC+j24aeIN7wgmHKqZCV+o=
-github.com/pmuston/notekit v0.0.0-20260727053702-602cd9c8f375/go.mod h1:8V/VYcPVVPRbtzUpGpJMV4AsfiOlX6le9RmbZ065hro=
+github.com/pmuston/notekit v0.0.0-20260811111809-513f1fba6471 h1:tgOA7BApKt2Iq2F0uLbocoJpXq2EBD/1ol5JCdka/ts=
+github.com/pmuston/notekit v0.0.0-20260811111809-513f1fba6471/go.mod h1:8V/VYcPVVPRbtzUpGpJMV4AsfiOlX6le9RmbZ065hro=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=
