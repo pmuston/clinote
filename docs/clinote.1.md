@@ -1,4 +1,4 @@
-% clinote 1 "2026-08-11" "clinote 2.1.0" "clinote Manual"
+% clinote 1 "2026-08-12" "clinote 2.2.0" "clinote Manual"
 
 <!--
   The first line above becomes the raw .TH arguments, in order:
@@ -37,6 +37,11 @@ rendered on GitHub.
 With no notebook argument, clinote uses the one notekit notebook in the current
 directory. It prints its URL and waits; it does **not** open a browser. Ctrl-C
 stops it and destroys the shell.
+
+Each cell offers **Run**, **Run below** — this cell and every cell after it, for a
+pipeline whose first stage is too expensive to repeat — a format dropdown, and
+move and delete. **Interrupt** sends SIGINT to a running command, which recovers a
+hung cell without stopping the server.
 
 This is clinote v2, built on the notekit library. Notebooks written by clinote v1
 use a different, incompatible format — see **MIGRATING** below.
@@ -100,7 +105,7 @@ new file _name_`.v2.md` is written and the original left alone.
 The format belongs to notekit; its specification is authoritative. In outline:
 
 Front matter must carry `notekit: 1`. `title` and `shell` are honoured, and
-unknown keys are preserved. Three further keys affect the reader:
+unknown keys are preserved. Four further keys affect the reader:
 
 **width**
 : `full` uses the whole window rather than a reading column.
@@ -115,6 +120,14 @@ can edit the file in their editor.
 : `true` declares that the notebook displays files from its own directory. It
 requests only; see **-allow-local-files**.
 
+**requires**
+: Names the environment variables the notebook needs, as an inline list —
+`requires: [NEO4J_PW, NEO4J_URL]`. The page reports which are unset and never
+blocks: a notebook should open for reading without the credentials to hand, and a
+cell that needs one fails on its own terms with a better message. Only names are
+read, and only whether each is non-empty, so no value reaches the notebook. A YAML
+block list is not readable here and is reported as a mistake.
+
 A **cell** is an ATX heading of level 2–6, optional prose, then a fenced code
 block tagged `sh`. A heading's section holds exactly **one** source fence: a
 second fenced block in the same section is prose and will never run. Every cell
@@ -128,21 +141,32 @@ non-zero exit writes an `error` fence carrying `status`.
     du -d1 -h | sort -hr | head -5
     ```
 
-    ```output {format=csv, run="2026-07-16T09:41:07Z", tool="clinote/2.0"}
+    ```output {format=csv, run="2026-07-16T09:41:07Z", tool="clinote/2.2"}
     size,path
     1.2G,./data
     ```
 
 # RESULT KINDS
 
-Declared on the cell as `{format=…}`:
+Declared on the cell as `{format=…}`, or chosen from the dropdown in each cell's
+header. Picking one rewrites the cell's `{format=…}` **and relabels the result
+already on the page**, so output that turns out to be a table becomes one without
+re-running an expensive command. A result body is the bytes the command produced
+and `format` says how to read them, so relabelling changes no data; an `error` block
+is left alone.
+
+The kinds:
 
 **text**
 : The default, written by omitting the key. Plain preformatted text. ANSI colour
 renders live only; the file keeps stripped text.
 
 **csv**, **tsv**
-: Rendered as a sortable table. CSV is RFC 4180 with a header row.
+: Rendered as a sortable table, header row required. CSV is RFC 4180. TSV is not
+CSV with a different delimiter: it has no quoting at all, so a field cannot contain
+a tab or a newline and nothing is unescaped — `he said "hi", ok` is exactly those
+characters. That is what makes it the easy one to emit from a shell (`cut`,
+`awk -F'\t'`, `psql -A -F$'\t'`) for data that would need quoting as CSV.
 
 **jsonl**
 : One JSON object per line, rendered as a table whose columns are the union of
@@ -237,6 +261,9 @@ Interrupt button.
 a function, or a subshell.
 - Files beside the notebook are served only with **-allow-local-files**, so an
 image link will not render until that is given.
+- Run all and Run below do not stop at the first failure. The cells are submitted
+to a scheduler that serialises them, so the rest are queued by the time one fails.
+clinote v1 halted the batch on a non-zero exit.
 
 # SEE ALSO
 

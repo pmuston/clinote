@@ -19,6 +19,7 @@ shell commands. For a one-page overview see [about.md](about.md).
 - [Result kinds](#result-kinds)
 - [stdout and stderr](#stdout-and-stderr)
 - [Secrets](#secrets)
+- [Declaring what a notebook needs](#declaring-what-a-notebook-needs)
 - [Migrating from v1](#migrating-from-v1)
 - [Worked example: a query-to-figure pipeline](#worked-example-a-query-to-figure-pipeline)
 - [CLI reference](#cli-reference)
@@ -52,7 +53,7 @@ Check which you have:
 
 ```sh
 clinote version
-# clinote v2.1.0 (a1b2c3d4e5f6)
+# clinote v2.2.0 (a1b2c3d4e5f6)
 ```
 
 A `, modified` suffix means the binary was built from a dirty tree.
@@ -83,7 +84,7 @@ echo "hello from clinote"
 Click **Run**. The result is written into the same file:
 
 ````markdown
-```output {run="2026-08-11T09:51:02Z", tool="clinote/2.0"}
+```output {run="2026-08-11T09:51:02Z", tool="clinote/2.2"}
 hello from clinote
 ```
 ````
@@ -95,13 +96,14 @@ That is the whole loop.
 **Front matter** — `notekit: 1` marks the file as a notebook and is required.
 `notekit-tool: clinote` records which tool wrote it (advisory; it never decides
 whether a notebook opens). `title` and `shell` are honoured. Unknown keys are
-preserved. Three keys change how a reader treats the notebook:
+preserved. Four keys change how a reader treats the notebook:
 
 | Key | Effect |
 |---|---|
 | `width: full` | Use the whole window rather than a reading column. |
 | `editable: false` | Withhold editing: the source, prose, and adding, deleting or moving cells. |
 | `local-files: true` | Declare that the notebook displays files from its own directory. |
+| `requires: [NAME, …]` | Name the environment variables the notebook needs. See [below](#declaring-what-a-notebook-needs). |
 
 `editable: false` **never gates running** — a notebook handed to someone to work
 through is meant to be run, and running still writes results. It is a guard rail
@@ -140,9 +142,19 @@ run. Success writes `output`; failure writes `error` with the exit status.
 
 - **Run** on each cell.
 - **Run all** runs every cell from the top.
+- **Run below** runs this cell and everything after it. The case it exists for: a
+  pipeline whose first stage is an expensive query, where you are iterating on what
+  comes after it.
+- **The format dropdown** changes how a cell's result is read — see
+  [Result kinds](#result-kinds).
 - **Add** and **Delete** for cells; prose is editable in place.
 - **Interrupt** sends SIGINT to a running command — the way to recover a hung cell
   without stopping the server.
+
+**Run all and Run below do not stop at the first failure.** The cells are submitted
+to a scheduler that serialises them, so by the time one fails the rest are queued
+already. clinote v1 halted the batch on a non-zero exit; if a later stage would run
+against stale inputs, watch it rather than assuming a red block stopped things.
 
 The UI works without JavaScript, and cell bodies are editable directly.
 
@@ -214,7 +226,20 @@ psql -c "select id, email from users" --csv
 Anything live-only — colour, sortability — degrades to nothing on disk. The file is
 the artifact; the browser is a courtesy.
 
-To change a cell's kind, edit the cell. v1's dropdown is not in v2.
+**Changing the kind after a run.** Every cell has a dropdown in its header. Picking
+a kind rewrites `{format=…}` on the cell *and relabels the result already on the
+page*, so output you have just realised was a table becomes one without re-running.
+That matters when the command was expensive; when it was not, re-running works too.
+
+Relabelling is honest rather than a fudge: a result body is the bytes the command
+produced, and `format` says how to read them, not what they are. An `error` block is
+left alone — a failure is not a table however the cell is labelled.
+
+`tsv` is not `csv` with a different delimiter. It has no quoting at all, so a field
+cannot contain a tab or a newline and nothing is unescaped: a cell reading
+`he said "hi", ok` is exactly those characters, quotes and comma included. That is
+what makes it the easy one to emit from a shell — `cut`, `awk -F'\t'`,
+`psql -A -F$'\t'` — for data that would need quoting as CSV.
 
 ## stdout and stderr
 
@@ -222,7 +247,7 @@ Both interleave as produced, as in a terminal. Exit zero writes an `output` bloc
 non-zero writes an `error` block with the status:
 
 ````markdown
-```error {status=127, run="2026-08-11T09:44:12Z", tool="clinote/2.0"}
+```error {status=127, run="2026-08-11T09:44:12Z", tool="clinote/2.2"}
 zsh: command not found: dv
 ```
 ````
@@ -263,8 +288,42 @@ or a leftover placeholder, which otherwise surface as a confusing auth error
 several cells later. The `${VAR:?}` form fails the cell without killing the
 session, because the shell is interactive.
 
-v1's `requires:` front-matter banner is not in v2, so the guard cell is the whole
-mechanism for now.
+The guard cell pairs with `requires:`, below: the front matter says what is needed
+so a reader knows before running anything, and the guard makes a cell fail cleanly
+if it is missing anyway.
+
+## Declaring what a notebook needs
+
+List the environment variables a notebook depends on and the page says which are
+missing before you run anything:
+
+```yaml
+---
+notekit: 1
+title: Graph queries
+requires: [NEO4J_PW, NEO4J_URL]
+---
+```
+
+Only names are read, and only whether each is non-empty — no value ever reaches the
+notebook, which is the point. Handing someone a notebook that names its
+prerequisites is better than handing them one that fails on cell four.
+
+**It never blocks.** A notebook should open for reading without your credentials to
+hand, and a cell that needs one fails on its own terms with a better message than a
+refusal at the front door. Pair it with a guard cell (above) for the loud failure.
+
+**Write it inline.** A YAML block list —
+
+```yaml
+requires:
+  - NEO4J_PW
+```
+
+— is invisible to the reader: notekit parses front matter without a YAML
+marshaller, deliberately, so that a notebook round-trips byte for byte. The block
+form comes back empty. clinote reports that as a mistake and names the inline form
+rather than silently reporting nothing, but the fix is yours to make.
 
 ## Migrating from v1
 

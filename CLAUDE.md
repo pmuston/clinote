@@ -57,7 +57,14 @@ Everything else comes from `github.com/pmuston/notekit`: `doc` (format, parse, s
 
 ## Deliberately absent
 
-Present in v1, not in v2, and mostly belonging in notekit's `serve` where sqlnote would benefit too: run-from-here, the output format picker, `requires:`, `width: full`, `editable:` gating, `dur=`, and serving files beside the notebook (so image links do not render). Do not re-add these here without first asking whether they belong upstream.
+`dur=` is the only v1 feature still missing. It needs a reserved key in notekit's §6, which is a format change and a bigger question than a clinote one.
+
+Everything else on that list came back **upstream**, in notekit's `serve` and `kind`, where sqlnote gets it too: `width: full`, `editable:`, `local-files:`, `requires:`, run-below, the format picker, and `tsv`. That is the pattern to follow — when a v1 feature is missing, first ask whether it is generic. Almost all of them were.
+
+Two things worth knowing when working on this:
+
+- **A tool must not hard-code what the kit knows.** `tsv` was documented in four clinote files while `cmd/clinote/shell.go` matched `case kind.CSV, kind.JSONL`, so the branch that builds a table payload was never reached. The executor now asks `kind.NewRegistry().LookupFormat`, and the UI builds its dropdown from `Registry.Formats()`. Neither should ever go back to a literal list.
+- **Run all and Run below do not stop at the first failure.** The cells are submitted to a scheduler that serialises them, so the rest are queued by the time one fails. v1 halted the batch. Changing this means a batch concept in notekit's `run` and a change to what run-all already does for every tool — an open decision, not an oversight.
 
 ## Historical
 

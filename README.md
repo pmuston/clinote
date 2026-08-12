@@ -50,6 +50,11 @@ clinote version
 clinote prints its URL and waits; **it does not open a browser** (v1 did). Ctrl-C
 stops it.
 
+In the browser each cell offers **Run**, **Run below** (this cell and everything
+after it — for a pipeline whose first stage is expensive), a **format dropdown**,
+and move/delete. **Interrupt** sends SIGINT to a running command, which is how you
+recover a hung cell without stopping the server.
+
 ## The notebook format
 
 The format is notekit's, and its
@@ -69,7 +74,7 @@ notekit-tool: clinote
 du -d1 -h | sort -hr | head -5
 ```
 
-```output {format=csv, run="2026-07-16T09:41:07Z", tool="clinote/2.0"}
+```output {format=csv, run="2026-07-16T09:41:07Z", tool="clinote/2.2"}
 size,path
 1.2G,./data
 ```
@@ -84,15 +89,17 @@ Two rules catch people out:
   ` ```error {status=127, …} `.
 
 Declare a result kind with `{format=csv}`, `{format=tsv}` or `{format=jsonl}` on
-the cell; tables render sortable in the browser and stay plain text on disk.
+the cell, or pick one from the dropdown in the browser; tables render sortable and
+stay plain text on disk.
 
-Three front-matter keys affect the reader:
+Four front-matter keys affect the reader:
 
 | Key | Effect |
 |---|---|
 | `width: full` | Use the whole window instead of a reading column. |
 | `editable: false` | Withhold editing. **Never** gates running — a notebook handed out to be worked through still runs. A guard rail, not a control: anyone can edit the file in their editor. |
 | `local-files: true` | Declare that the notebook shows files from its directory. Requests only — `-allow-local-files` is what grants it. |
+| `requires: [NAME, …]` | Name the environment variables the notebook needs. Reports which are unset; never blocks. Write it **inline** — a YAML block list is invisible to the reader. |
 
 ## Migrating from v1
 
@@ -126,13 +133,17 @@ success. The notekit format has one result body, so that distinction is gone —
 
 ## Not in v2 yet
 
-Present in v1, deliberately absent while the substrate settles. Most belong in
-notekit's `serve`, where sqlnote would get them too:
+Present in v1, still absent. As of 2.2.0 this list is down to one entry, the rest
+having gone upstream into notekit's `serve` where sqlnote gets them too:
 
-- **run-from-here** — v2 has Run and Run all, but not "run this cell and below".
-- **Output format picker** — change `{format=…}` by editing the cell instead.
-- **`requires:`** — no banner for missing environment variables.
-- **`dur=`** — the format records `run` and `tool`, not elapsed time.
+- **`dur=`** — the format records `run` and `tool`, not elapsed time. Adding it
+  means a new reserved key in notekit's §6, which is a format change rather than a
+  clinote one.
+
+One behaviour differs from v1 rather than being missing: **Run all and Run below do
+not stop at the first failure.** notekit submits the cells to a scheduler that
+serialises them, so by the time one fails the rest are already queued. v1 halted the
+batch on a non-zero exit.
 
 ## Building
 

@@ -32,9 +32,15 @@ checker judges them.
 - **Results written back into the file** — an `output` fence on success, a
   first-class `error` fence carrying the exit status on failure.
 - **Typed results** — `{format=csv}`, `{format=tsv}` or `{format=jsonl}` render as
-  sortable tables in the browser and stay plain text on disk.
-- **Run, Run all, Interrupt** — Interrupt sends SIGINT to the running command, so
-  a hung cell need not cost you the session.
+  sortable tables in the browser and stay plain text on disk. A dropdown changes a
+  cell's kind and relabels the result already on the page, so output that turns out
+  to be a table becomes one without re-running an expensive command.
+- **Run, Run all, Run below, Interrupt** — Run below covers the pipeline whose
+  first stage is too costly to repeat. Interrupt sends SIGINT to the running
+  command, so a hung cell need not cost you the session.
+- **Front matter that travels with the notebook** — `width: full`, `editable:
+  false`, `local-files: true` and `requires: [NAME, …]`, the last reporting which
+  environment variables are unset without ever reading a value.
 - **Cell identity and sidecars** — from the kit: durable cell `id`s, and an
   artifact lifecycle that survives heading renames and reordering.
 - **`clinote migrate`** — converts clinote v1 notebooks, refusing to write if the
@@ -54,13 +60,14 @@ streaming output.
 ## At a glance
 
 ```sh
-git clone https://github.com/pmuston/clinote
-cd clinote && go install ./cmd/clinote
+brew tap pmuston/tap
+brew trust pmuston/tap
+brew install pmuston/tap/clinote
 
 clinote new notebook.md
 # → prints a URL; open it, click Run, output appears in the file
 ```
 
-v2 is not yet released — Homebrew still serves v1, whose format is incompatible.
+v1 notebooks use an incompatible format; `clinote migrate` converts them.
 
 For the full tour, see [user-guide.md](user-guide.md).
