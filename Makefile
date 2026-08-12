@@ -50,6 +50,9 @@ conformance: ## Migrate the v1 corpus and check it with notekit's notefmt
 	$(GO) run github.com/pmuston/notekit/cmd/notefmt@latest -strict check *.v2.md; \
 	echo "conformance ok ($$(ls *.v2.md | wc -l | tr -d ' ') notebooks)"; \
 	rm -rf $$tmp
+	@# The shipped examples are handed to users and linked from the demo page, so
+	@# they are held to the same standard as anything clinote writes.
+	@$(GO) run github.com/pmuston/notekit/cmd/notefmt@latest -strict check examples/*.md
 
 # Runs `check` on Linux. zsh is installed because the shell tests refuse to skip a
 # shell they cannot find — which is exactly the failure a macOS-only run misses.

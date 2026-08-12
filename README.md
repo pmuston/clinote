@@ -12,7 +12,9 @@ The file stays plain CommonMark — readable, grep-able, and correct on GitHub.
 > shell executor. **v2 cannot open a v1 notebook** — see
 > [Migrating from v1](#migrating-from-v1).
 
-For a tour, read the [user guide](docs/user-guide.md).
+For a tour, read the [user guide](docs/user-guide.md), or work through
+[clinote in five minutes](https://pmuston.github.io/clinote/demo/) — one real
+investigation, using the notebook in [examples/](examples/).
 
 ## Install
 
