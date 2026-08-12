@@ -54,7 +54,7 @@ Check which you have:
 
 ```sh
 clinote version
-# clinote v2.2.0 (a1b2c3d4e5f6)
+# clinote v2.2.1 (a1b2c3d4e5f6)
 ```
 
 A `, modified` suffix means the binary was built from a dirty tree.

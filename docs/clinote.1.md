@@ -1,4 +1,4 @@
-% clinote 1 "2026-08-12" "clinote 2.2.0" "clinote Manual"
+% clinote 1 "2026-08-12" "clinote 2.2.1" "clinote Manual"
 
 <!--
   The first line above becomes the raw .TH arguments, in order:
