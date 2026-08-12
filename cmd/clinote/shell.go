@@ -321,8 +321,12 @@ func (s *shellSession) Execute(ctx context.Context, req exec.Request) (exec.Resu
 			format = e.Value
 		}
 	}
-	switch format {
-	case kind.CSV, kind.JSONL:
+	// Asked of the registry rather than matched against a list written here: a
+	// serialisation added to the kit's table kind should start working without this
+	// file being edited to know about it. That list is where `tsv` was lost — four
+	// documents described it while a hard-coded `case` sent it to the text branch,
+	// so no renderer was ever reached.
+	if k, ok := kind.NewRegistry().LookupFormat(format); ok && k.Name == kind.Table {
 		// The proven two-axis usage: the info string says what kind of block this is
 		// and how to interpret its body (harvest open question 1).
 		return exec.Result{
@@ -330,9 +334,8 @@ func (s *shellSession) Execute(ctx context.Context, req exec.Request) (exec.Resu
 			Payload:   kind.TablePayload{Format: format, Body: out},
 			Truncated: truncated,
 		}, nil
-	default:
-		return exec.Result{Kind: kind.Text, Payload: out, Truncated: truncated}, nil
 	}
+	return exec.Result{Kind: kind.Text, Payload: out, Truncated: truncated}, nil
 }
 
 // drain consumes any bytes left over between commands, so a stray write — a process
