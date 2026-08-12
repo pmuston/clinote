@@ -162,6 +162,10 @@ on CI where zsh is absent.
 - Single user, one notebook per server process.
 - The in-memory notebook is authoritative; external edits are overwritten on save.
 - Interactive TUI commands (`vim`, `less`, `htop`) hang the cell — use Interrupt.
+- Cells run under a pty, so tools see a terminal and draw progress bars. Single-line
+  redraws are replayed, so the file keeps the final line; multi-line ones are not.
+  `export CI=1` in a setup cell, a tool's own `--progress=plain`, or `| cat` stops
+  them being drawn at all.
 - Output is capped per cell; the excess is dropped and marked `truncated`.
 - `exit N` in a cell terminates the persistent shell; use `false` or a subshell.
 - ANSI colour renders live only; the file keeps plain text.

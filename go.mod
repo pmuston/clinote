@@ -4,7 +4,7 @@ go 1.25.4
 
 require (
 	github.com/creack/pty v1.1.24
-	github.com/pmuston/notekit v0.0.0-20260812061049-3e91ba618b01
+	github.com/pmuston/notekit v0.0.0-20260812072613-1493681318f4
 	golang.org/x/sys v0.46.0
 )
 

@@ -15,6 +15,7 @@ shell commands. For a one-page overview see [about.md](about.md).
 - [Anatomy of a notebook](#anatomy-of-a-notebook)
 - [Working in the browser](#working-in-the-browser)
 - [The persistent shell](#the-persistent-shell)
+- [Progress bars and spinners](#progress-bars-and-spinners)
 - [Defining macros](#defining-macros)
 - [Result kinds](#result-kinds)
 - [stdout and stderr](#stdout-and-stderr)
@@ -181,6 +182,52 @@ pwd
 
 The second cell prints `/var/log`. The same holds for environment variables, shell
 functions, aliases and `set` options. The session ends when clinote stops.
+
+## Progress bars and spinners
+
+clinote runs cells under a pty, which is what makes `cd` persist and lets tools that
+need a terminal work at all. The cost is that **every tool thinks it is talking to a
+person**: `[ -t 1 ]` is true in a cell, so anything with a progress display draws one.
+`-term dumb` does not prevent this — most spinner libraries check whether stdout is a
+terminal, not what `TERM` says.
+
+A spinner redraws one line by returning to column zero between frames. clinote replays
+that, so the file keeps the line as it finally read rather than every frame end to end:
+
+````markdown
+```output {run="…", tool="clinote/2.2"}
+hello
+```
+````
+
+That is usually what you want. Two cases where it still is not:
+
+**A tool that redraws several lines at once** — `docker pull` with its per-layer bars,
+`cargo`, `bazel` — moves the cursor up between lines. Replaying that needs a whole
+screen modelled rather than a line, which clinote does not do; those still land as
+successive frames.
+
+**A tool that omits the erase.** Overwriting happens column by column, exactly as in a
+terminal, so a short frame leaves the tail of a longer one behind:
+`Downloading 100%` then `\rDone` reads `Doneloading 100%`. Your terminal shows the
+same thing — it is why well-behaved tools emit an erase-to-end-of-line — but it can
+look like clinote mangled the output when it did not.
+
+For both, the fix is to stop the tool drawing progress at all. In order of how often it
+works:
+
+```sh
+export CI=1                    # honoured by a great many CLIs; set it once
+some-tool --progress=plain     # or --quiet, --no-progress; check the tool
+some-tool | cat                # stdout is a pipe, so `[ -t 1 ]` is false
+```
+
+Because the shell persists, `export CI=1` in a setup cell covers the whole notebook.
+`| cat` is the reliable fallback when a tool has no flag — it is the same trick that
+makes tools behave in a shell script.
+
+Note that `| cat` changes the exit status to `cat`'s. Add `set -o pipefail` in a setup
+cell if a cell must still fail when the command does.
 
 ## Defining macros
 
@@ -488,7 +535,9 @@ a session. Stop clinote, edit, restart.
 or a subshell `( … ; exit N )`.
 
 **TUI programs hang the cell.** `vim`, `less`, `htop` — use Interrupt to recover,
-and prefer `cat`, `head`, `tail`.
+and prefer `cat`, `head`, `tail`. This is not a gap to be filled: a full-screen program
+produces a *screen*, and a notebook records a *stream*. The cell never exits, so there
+would be nothing to write down even if the screen were captured.
 
 **Output is capped per cell.** The excess is dropped and the block marked
 `truncated`.

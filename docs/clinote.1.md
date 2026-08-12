@@ -175,6 +175,30 @@ keys.
 Nothing that exists only in the browser — colour, sortability — survives to disk.
 The durable form must stand alone.
 
+# PROGRESS DISPLAYS
+
+Cells run under a pty — which is what makes working directory and shell state persist
+— so every tool sees a terminal and anything with a spinner or a progress bar draws
+one. **-term** `dumb` does not prevent it: most such tools test whether stdout is a
+terminal, not what `TERM` says.
+
+A display that redraws one line is replayed, so the result holds the line as it finally
+read rather than every frame concatenated. Overwriting is column by column as in a
+terminal, so a tool that omits an erase-to-end-of-line leaves the tail of a longer
+frame behind — `Downloading 100%` followed by a carriage return and `Done` reads
+`Doneloading 100%`, which is what the terminal shows too.
+
+A display that redraws *several* lines by moving the cursor up is not replayed. That
+needs a screen to be modelled rather than a line.
+
+To stop a tool drawing progress at all:
+
+    export CI=1                  # honoured widely; the shell persists, so set it once
+    some-tool --progress=plain   # or --quiet, --no-progress
+    some-tool | cat              # stdout becomes a pipe, so `[ -t 1 ]` is false
+
+`| cat` reports cat's exit status; add `set -o pipefail` if the cell must still fail.
+
 # OUTPUT
 
 Standard output and standard error interleave as produced, as they would in a
@@ -254,7 +278,10 @@ Convert every v1 notebook in a directory, reporting first:
 - The in-memory notebook is authoritative; external edits during a session are
 overwritten on the next save.
 - Interactive TUI commands (`vim`, `less`, `htop`) hang the cell. Use the
-Interrupt button.
+Interrupt button. A full-screen program produces a screen and a notebook records a
+stream, so this is a boundary rather than a gap.
+- Cells run under a pty, so `[ -t 1 ]` is true and tools draw progress displays.
+See **PROGRESS DISPLAYS**.
 - Output is capped per cell; the excess is dropped and the block marked
 `truncated`.
 - `exit N` in a cell terminates the persistent shell. Use `false`, `return` inside

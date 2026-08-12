@@ -18,6 +18,8 @@ github.com/pmuston/notekit v0.0.0-20260811112844-1c80380e7997 h1:AIWn+0bHLxfFn5u
 github.com/pmuston/notekit v0.0.0-20260811112844-1c80380e7997/go.mod h1:8V/VYcPVVPRbtzUpGpJMV4AsfiOlX6le9RmbZ065hro=
 github.com/pmuston/notekit v0.0.0-20260812061049-3e91ba618b01 h1:QTrRCnje7sgWAJXZh3erpmZTBPg+GTwWybUjctGLP5w=
 github.com/pmuston/notekit v0.0.0-20260812061049-3e91ba618b01/go.mod h1:8V/VYcPVVPRbtzUpGpJMV4AsfiOlX6le9RmbZ065hro=
+github.com/pmuston/notekit v0.0.0-20260812072613-1493681318f4 h1:RRWay5XuV8xdB+EBAyUFYSUw+kNFF+2RP26jmidKrUQ=
+github.com/pmuston/notekit v0.0.0-20260812072613-1493681318f4/go.mod h1:8V/VYcPVVPRbtzUpGpJMV4AsfiOlX6le9RmbZ065hro=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
 github.com/valyala/bytebufferpool v1.0.0 h1:GqA5TC/0021Y/b9FG4Oi9Mr3q7XYx6KllzawFIhcdPw=
